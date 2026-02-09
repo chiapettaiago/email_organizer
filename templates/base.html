@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Email Organizer{% endblock %}</title>
+    <meta name="description" content="Organizador inteligente de e-mails com detecção de spam e fraude">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body class="dark-theme">
+    {% if email %}
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-brand">
+                <span class="logo">📧</span>
+                <span class="brand-text">Email Organizer</span>
+            </div>
+            <button class="sidebar-toggle" id="sidebar-toggle" title="Recolher menu">
+                <span>☰</span>
+            </button>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('dashboard') }}"
+                class="sidebar-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
+                <span class="sidebar-icon">📊</span>
+                <span class="sidebar-text">Dashboard</span>
+            </a>
+            <a href="{{ url_for('emails') }}"
+                class="sidebar-link {% if request.endpoint == 'emails' %}active{% endif %}">
+                <span class="sidebar-icon">📬</span>
+                <span class="sidebar-text">E-mails</span>
+            </a>
+            <a href="{{ url_for('folders') }}"
+                class="sidebar-link {% if request.endpoint == 'folders' %}active{% endif %}">
+                <span class="sidebar-icon">📁</span>
+                <span class="sidebar-text">Pastas</span>
+            </a>
+            <a href="{{ url_for('analise_interativa') }}"
+                class="sidebar-link {% if request.endpoint == 'analise_interativa' %}active{% endif %}">
+                <span class="sidebar-icon">🔍</span>
+                <span class="sidebar-text">Análise</span>
+            </a>
+            <a href="{{ url_for('settings') }}"
+                class="sidebar-link {% if request.endpoint == 'settings' %}active{% endif %}">
+                <span class="sidebar-icon">⚙️</span>
+                <span class="sidebar-text">Configurações</span>
+            </a>
+            {% if session.get('is_admin') %}
+            <a href="{{ url_for('admin_users') }}"
+                class="sidebar-link {% if request.endpoint == 'admin_users' %}active{% endif %}">
+                <span class="sidebar-icon">👥</span>
+                <span class="sidebar-text">Usuários</span>
+            </a>
+            {% endif %}
+        </nav>
+
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar">{{ email[0]|upper }}</div>
+                <div class="user-details">
+                    <span class="user-email">{{ email }}</span>
+                    <span class="user-status">● Online</span>
+                </div>
+            </div>
+            <a href="{{ url_for('logout') }}" class="sidebar-link logout-link">
+                <span class="sidebar-icon">🚪</span>
+                <span class="sidebar-text">Sair</span>
+            </a>
+        </div>
+    </aside>
+
+    <!-- Overlay for mobile -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <!-- Mobile header -->
+    <header class="mobile-header">
+        <button class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
+        <span class="mobile-title">📧 Email Organizer</span>
+    </header>
+    {% endif %}
+
+    <main class="main-content {% if email %}has-sidebar{% endif %}">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="flash-messages">
+            {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">
+                {{ message }}
+                <button class="flash-close" onclick="this.parentElement.remove()">×</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script>
+        // Sidebar toggle functionality
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+
+        if (sidebarToggle) {
+            sidebarToggle.addEventListener('click', () => {
+                sidebar.classList.toggle('collapsed');
+                localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+            });
+
+            // Restore state
+            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                sidebar.classList.add('collapsed');
+            }
+        }
+
+        if (mobileMenuBtn) {
+            mobileMenuBtn.addEventListener('click', () => {
+                sidebar.classList.add('mobile-open');
+                sidebarOverlay.classList.add('active');
+            });
+        }
+
+        if (sidebarOverlay) {
+            sidebarOverlay.addEventListener('click', () => {
+                sidebar.classList.remove('mobile-open');
+                sidebarOverlay.classList.remove('active');
+            });
+        }
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+
+</html>

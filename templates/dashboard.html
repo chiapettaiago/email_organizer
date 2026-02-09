@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Email Organizer{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <header class="page-header">
+        <h1>Dashboard</h1>
+        <div class="header-actions">
+            <button id="btn-scan" class="btn btn-primary">
+                <span class="icon">🔍</span> Analisar E-mails
+            </button>
+            <button id="btn-organize" class="btn btn-secondary">
+                <span class="icon">📁</span> Organizar Automaticamente
+            </button>
+        </div>
+    </header>
+
+    <div class="stats-grid">
+        <div class="stat-card stat-total">
+            <div class="stat-icon">📬</div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.total }}</span>
+                <span class="stat-label">E-mails na Inbox</span>
+            </div>
+        </div>
+
+        <div class="stat-card stat-unread">
+            <div class="stat-icon">📩</div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.unread }}</span>
+                <span class="stat-label">Não Lidos</span>
+            </div>
+        </div>
+
+        <div class="stat-card stat-spam">
+            <div class="stat-icon">🚫</div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.spam }}</span>
+                <span class="stat-label">Spam Detectado</span>
+            </div>
+        </div>
+
+        <div class="stat-card stat-folders">
+            <div class="stat-icon">📁</div>
+            <div class="stat-content">
+                <span class="stat-value">{{ stats.folders|length }}</span>
+                <span class="stat-label">Pastas</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <section class="dashboard-section folders-section">
+            <h2>Pastas</h2>
+            <div class="folders-list">
+                {% for folder in stats.folders %}
+                <a href="{{ url_for('emails', folder=folder) }}" class="folder-item">
+                    <span class="folder-icon">
+                        {% if 'inbox' in folder.lower() %}📥
+                        {% elif 'spam' in folder.lower() %}🚫
+                        {% elif 'fraude' in folder.lower() %}⚠️
+                        {% elif 'trabalho' in folder.lower() %}💼
+                        {% elif 'pessoal' in folder.lower() %}👤
+                        {% elif 'newsletter' in folder.lower() %}📰
+                        {% elif 'trash' in folder.lower() or 'lixeira' in folder.lower() %}🗑️
+                        {% elif 'sent' in folder.lower() or 'enviado' in folder.lower() %}📤
+                        {% elif 'draft' in folder.lower() or 'rascunho' in folder.lower() %}📝
+                        {% else %}📁{% endif %}
+                    </span>
+                    <span class="folder-name">{{ folder }}</span>
+                    <span class="folder-arrow">→</span>
+                </a>
+                {% else %}
+                <p class="empty-message">Nenhuma pasta encontrada</p>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="dashboard-section actions-section">
+            <h2>Ações Rápidas</h2>
+            <div class="quick-actions">
+                <button id="btn-delete-spam" class="action-btn action-danger">
+                    <span class="action-icon">🗑️</span>
+                    <span class="action-text">Limpar Spam</span>
+                </button>
+                <a href="{{ url_for('folders') }}" class="action-btn action-info">
+                    <span class="action-icon">➕</span>
+                    <span class="action-text">Nova Pasta</span>
+                </a>
+                <a href="{{ url_for('settings') }}" class="action-btn action-default">
+                    <span class="action-icon">⚙️</span>
+                    <span class="action-text">Configurações</span>
+                </a>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modal de Resultados -->
+    <div id="results-modal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Resultados</h3>
+                <button class="modal-close" onclick="closeModal()">×</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <!-- Conteúdo dinâmico -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.getElementById('btn-scan').addEventListener('click', async function () {
+        this.disabled = true;
+        this.innerHTML = '<span class="icon">⏳</span> Analisando...';
+        showProgress('🔍 Analisando e-mails para spam e fraude...');
+
+        try {
+            const response = await fetch('/scan', { method: 'POST' });
+            const data = await response.json();
+
+            hideProgress();
+
+            let html = `
+            <div class="scan-results">
+                <div class="result-summary">
+                    <p><strong>${data.total_scanned}</strong> e-mails analisados</p>
+                    <p class="text-warning"><strong>${data.spam_found}</strong> spam encontrados</p>
+                    <p class="text-danger"><strong>${data.fraud_found}</strong> fraudes detectadas</p>
+                </div>
+        `;
+
+            if (data.items.length > 0) {
+                html += '<div class="result-list">';
+                data.items.forEach(item => {
+                    const badge = item.is_fraud ?
+                        '<span class="badge badge-danger">⚠️ Fraude</span>' :
+                        '<span class="badge badge-warning">🚫 Spam</span>';
+                    html += `
+                    <div class="result-item">
+                        ${badge}
+                        <div class="result-info">
+                            <strong>${item.subject}</strong>
+                            <small>De: ${item.from}</small>
+                            <small>Score: ${item.score}</small>
+                        </div>
+                    </div>
+                `;
+                });
+                html += '</div>';
+            }
+
+            html += '</div>';
+
+            document.getElementById('modal-title').textContent = 'Resultados da Análise';
+            document.getElementById('modal-body').innerHTML = html;
+            document.getElementById('results-modal').classList.remove('hidden');
+
+        } catch (error) {
+            hideProgress();
+            await showAlert('Erro ao analisar e-mails: ' + error.message, 'error');
+        }
+
+        this.disabled = false;
+        this.innerHTML = '<span class="icon">🔍</span> Analisar E-mails';
+    });
+
+    document.getElementById('btn-organize').addEventListener('click', async function () {
+        this.disabled = true;
+        this.innerHTML = '<span class="icon">⏳</span> Organizando...';
+        showProgress('📁 Organizando e-mails automaticamente...');
+
+        try {
+            const response = await fetch('/organize', { method: 'POST' });
+            const data = await response.json();
+
+            hideProgress();
+
+            let html = `
+            <div class="organize-results">
+                <div class="result-summary">
+                    <p><strong>${data.moved}</strong> e-mails movidos</p>
+                    <p><strong>${data.spam_detected}</strong> spam detectados</p>
+                    <p><strong>${data.fraud_detected}</strong> fraudes detectadas</p>
+                </div>
+        `;
+
+            if (data.details.length > 0) {
+                html += '<div class="result-list">';
+                data.details.slice(0, 10).forEach(item => {
+                    html += `
+                    <div class="result-item">
+                        <div class="result-info">
+                            <strong>${item.subject}</strong>
+                            <small>${item.action}</small>
+                        </div>
+                    </div>
+                `;
+                });
+                if (data.details.length > 10) {
+                    html += `<p class="text-muted">... e mais ${data.details.length - 10} e-mails</p>`;
+                }
+                html += '</div>';
+            }
+
+            html += '</div>';
+
+            document.getElementById('modal-title').textContent = 'Organização Concluída';
+            document.getElementById('modal-body').innerHTML = html;
+            document.getElementById('results-modal').classList.remove('hidden');
+
+            // Recarrega a página após 2 segundos para atualizar estatísticas
+            setTimeout(() => location.reload(), 2000);
+
+        } catch (error) {
+            hideProgress();
+            await showAlert('Erro ao organizar e-mails: ' + error.message, 'error');
+        }
+
+        this.disabled = false;
+        this.innerHTML = '<span class="icon">📁</span> Organizar Automaticamente';
+    });
+
+    document.getElementById('btn-delete-spam').addEventListener('click', async function () {
+        const confirmed = await showConfirm(
+            'Tem certeza que deseja mover todos os e-mails de spam e fraude para a lixeira?',
+            { title: 'Limpar Spam', confirmText: 'Sim, limpar', isDanger: true }
+        );
+        if (!confirmed) return;
+
+        this.disabled = true;
+        showProgress('🗑️ Removendo e-mails de spam e fraude...');
+
+        try {
+            const response = await fetch('/delete-spam', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uids: [] }) // Empty = delete all from spam folders
+            });
+            const data = await response.json();
+
+            hideProgress();
+            showToast(`${data.deleted} e-mails movidos para a lixeira!`, 'success');
+            location.reload();
+
+        } catch (error) {
+            hideProgress();
+            await showAlert('Erro ao limpar spam: ' + error.message, 'error');
+        }
+
+        this.disabled = false;
+    });
+
+    function closeModal() {
+        document.getElementById('results-modal').classList.add('hidden');
+    }
+
+    document.querySelector('.modal-overlay')?.addEventListener('click', closeModal);
+</script>
+{% endblock %}

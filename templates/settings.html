@@ -1,0 +1,743 @@
+{% extends "base.html" %}
+
+{% block title %}Configurações - Email Organizer{% endblock %}
+
+{% block content %}
+<div class="settings-page">
+    <header class="page-header">
+        <h1>⚙️ Configurações</h1>
+        <p class="page-subtitle">Personalize o comportamento do organizador de e-mails</p>
+    </header>
+
+    <form method="POST" class="settings-form">
+        <!-- Seção: Exclusão Automática -->
+        <section class="settings-card">
+            <div class="card-header">
+                <div class="card-icon danger">🗑️</div>
+                <div class="card-title-group">
+                    <h2>Exclusão Automática</h2>
+                    <p>E-mails detectados como spam ou fraude serão movidos para a lixeira</p>
+                </div>
+            </div>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-name">Excluir spam automaticamente</span>
+                        <span class="setting-description">E-mails identificados como spam serão movidos para a
+                            lixeira</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" name="auto_delete_spam" {% if config.auto_delete_spam %}checked{% endif
+                            %}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-name">Excluir fraudes automaticamente</span>
+                        <span class="setting-description">E-mails identificados como phishing serão movidos para a
+                            lixeira</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" name="auto_delete_fraud" {% if config.auto_delete_fraud %}checked{% endif
+                            %}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-row sensitivity">
+                    <div class="setting-info">
+                        <span class="setting-name">Sensibilidade da Detecção</span>
+                        <span class="setting-description">
+                            Quanto menor o valor, mais e-mails serão classificados como spam
+                        </span>
+                    </div>
+                    <div class="sensitivity-control">
+                        <div class="slider-container">
+                            <input type="range" id="spam_threshold" name="spam_threshold" min="30" max="90"
+                                value="{{ config.spam_threshold }}" oninput="updateThreshold(this.value)">
+                            <div class="slider-labels">
+                                <span>Menos sensível</span>
+                                <span>Mais sensível</span>
+                            </div>
+                        </div>
+                        <div class="threshold-display" id="threshold-display">
+                            <span class="threshold-value" id="threshold-value">{{ config.spam_threshold }}</span>
+                            <span class="threshold-label">%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Seção: Análise Automática -->
+        <section class="settings-card">
+            <div class="card-header">
+                <div class="card-icon primary">🕐</div>
+                <div class="card-title-group">
+                    <h2>Análise Automática Diária</h2>
+                    <p>O sistema analisará todos os e-mails no horário configurado</p>
+                </div>
+            </div>
+
+            <div class="card-content">
+                <div class="setting-row">
+                    <div class="setting-info">
+                        <span class="setting-name">Ativar análise automática</span>
+                        <span class="setting-description">Executa análise diariamente no horário definido</span>
+                    </div>
+                    <label class="switch">
+                        <input type="checkbox" name="auto_scan_enabled" {% if config.auto_scan_enabled %}checked{% endif
+                            %}>
+                        <span class="slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-row time-setting">
+                    <div class="setting-info">
+                        <span class="setting-name">Horário da Análise</span>
+                        <span class="setting-description">A análise será executada todos os dias neste horário</span>
+                    </div>
+                    <div class="time-picker">
+                        <input type="time" id="auto_scan_time" name="auto_scan_time" value="{{ config.auto_scan_time }}"
+                            class="time-input">
+                    </div>
+                </div>
+
+                {% if next_scan or config.last_scan %}
+                <div class="scan-status-row">
+                    {% if next_scan %}
+                    <div class="status-item next">
+                        <div class="status-icon">📅</div>
+                        <div class="status-text">
+                            <span class="status-label">Próxima análise</span>
+                            <span class="status-value">{{ next_scan }}</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if config.last_scan %}
+                    <div class="status-item last">
+                        <div class="status-icon">✅</div>
+                        <div class="status-text">
+                            <span class="status-label">Última análise</span>
+                            <span class="status-value">{{ config.last_scan[:16] | replace('T', ' às ') }}</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endif %}
+
+                <div class="action-row">
+                    <button type="button" id="btn-scan-now" class="btn btn-secondary">
+                        <span class="btn-icon">🔍</span>
+                        <span class="btn-text">Executar Análise Agora</span>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Seção: Organização -->
+        <section class="settings-card">
+            <div class="card-header">
+                <div class="card-icon success">📁</div>
+                <div class="card-title-group">
+                    <h2>Organização Automática</h2>
+                    <p>Pastas utilizadas para classificar seus e-mails</p>
+                </div>
+            </div>
+
+            <div class="card-content">
+                <div class="folder-grid">
+                    <div class="folder-item work">
+                        <span class="folder-icon">💼</span>
+                        <span class="folder-name">Trabalho</span>
+                    </div>
+                    <div class="folder-item personal">
+                        <span class="folder-icon">👤</span>
+                        <span class="folder-name">Pessoal</span>
+                    </div>
+                    <div class="folder-item newsletters">
+                        <span class="folder-icon">📰</span>
+                        <span class="folder-name">Newsletters</span>
+                    </div>
+                    <div class="folder-item spam">
+                        <span class="folder-icon">🚫</span>
+                        <span class="folder-name">Spam</span>
+                    </div>
+                    <div class="folder-item fraud">
+                        <span class="folder-icon">⚠️</span>
+                        <span class="folder-name">Fraude</span>
+                    </div>
+                </div>
+                <p class="folder-help">
+                    Use o botão <strong>"Organizar"</strong> no Dashboard para aplicar as regras
+                </p>
+            </div>
+        </section>
+
+        <!-- Seção: Conexão -->
+        <section class="settings-card">
+            <div class="card-header">
+                <div class="card-icon info">🔗</div>
+                <div class="card-title-group">
+                    <h2>Conexão</h2>
+                    <p>Configurações do servidor de e-mail</p>
+                </div>
+            </div>
+
+            <div class="card-content">
+                <div class="connection-grid">
+                    <div class="connection-item">
+                        <div class="connection-icon">📧</div>
+                        <div class="connection-info">
+                            <span class="connection-label">Conta</span>
+                            <span class="connection-value">{{ email }}</span>
+                        </div>
+                    </div>
+                    <div class="connection-item">
+                        <div class="connection-icon">📥</div>
+                        <div class="connection-info">
+                            <span class="connection-label">IMAP</span>
+                            <span class="connection-value">
+                                email-ssl.com.br:993
+                                <span class="ssl-badge">SSL</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="connection-item">
+                        <div class="connection-icon">📤</div>
+                        <div class="connection-info">
+                            <span class="connection-label">SMTP</span>
+                            <span class="connection-value">
+                                email-ssl.com.br:465
+                                <span class="ssl-badge">SSL</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Botão Salvar -->
+        <div class="form-footer">
+            <button type="submit" class="btn btn-primary btn-save">
+                <span class="btn-icon">💾</span>
+                <span class="btn-text">Salvar Configurações</span>
+            </button>
+        </div>
+    </form>
+</div>
+
+<style>
+    .settings-page {
+        max-width: 800px;
+        margin: 0 auto;
+    }
+
+    .page-header {
+        margin-bottom: 2rem;
+    }
+
+    .page-header h1 {
+        margin-bottom: 0.5rem;
+    }
+
+    .page-subtitle {
+        color: var(--text-secondary);
+        font-size: 1rem;
+        margin: 0;
+    }
+
+    /* Cards */
+    .settings-card {
+        background: var(--bg-card);
+        border-radius: 16px;
+        border: 1px solid var(--border-color);
+        margin-bottom: 1.5rem;
+        overflow: hidden;
+        transition: box-shadow 0.2s ease;
+    }
+
+    .settings-card:hover {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    }
+
+    .card-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+        background: rgba(255, 255, 255, 0.02);
+    }
+
+    .card-icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        flex-shrink: 0;
+    }
+
+    .card-icon.danger {
+        background: rgba(239, 68, 68, 0.15);
+    }
+
+    .card-icon.primary {
+        background: rgba(99, 102, 241, 0.15);
+    }
+
+    .card-icon.success {
+        background: rgba(34, 197, 94, 0.15);
+    }
+
+    .card-icon.info {
+        background: rgba(59, 130, 246, 0.15);
+    }
+
+    .card-title-group h2 {
+        font-size: 1.125rem;
+        font-weight: 600;
+        margin: 0 0 0.25rem 0;
+        color: var(--text-primary);
+    }
+
+    .card-title-group p {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        margin: 0;
+    }
+
+    .card-content {
+        padding: 1.5rem;
+    }
+
+    /* Setting Rows */
+    .setting-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .setting-row:last-child {
+        border-bottom: none;
+    }
+
+    .setting-row.sensitivity {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+
+    .setting-info {
+        flex: 1;
+    }
+
+    .setting-name {
+        display: block;
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 0.25rem;
+    }
+
+    .setting-description {
+        display: block;
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+    }
+
+    /* Toggle Switch */
+    .switch {
+        position: relative;
+        display: inline-block;
+        width: 52px;
+        height: 28px;
+        flex-shrink: 0;
+    }
+
+    .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: var(--bg-tertiary);
+        border: 1px solid var(--border-color);
+        transition: 0.3s;
+        border-radius: 28px;
+    }
+
+    .slider:before {
+        position: absolute;
+        content: "";
+        height: 22px;
+        width: 22px;
+        left: 2px;
+        bottom: 2px;
+        background: white;
+        transition: 0.3s;
+        border-radius: 50%;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    input:checked+.slider {
+        background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+        border-color: transparent;
+    }
+
+    input:checked+.slider:before {
+        transform: translateX(24px);
+    }
+
+    /* Sensitivity Slider */
+    .sensitivity-control {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+    }
+
+    .slider-container {
+        flex: 1;
+    }
+
+    .slider-container input[type="range"] {
+        width: 100%;
+        height: 8px;
+        -webkit-appearance: none;
+        background: linear-gradient(to right,
+                rgba(34, 197, 94, 0.3),
+                rgba(234, 179, 8, 0.3),
+                rgba(239, 68, 68, 0.3));
+        border-radius: 4px;
+        outline: none;
+    }
+
+    .slider-container input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 24px;
+        height: 24px;
+        background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+        border-radius: 50%;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(139, 92, 246, 0.4);
+        transition: transform 0.2s;
+    }
+
+    .slider-container input[type="range"]::-webkit-slider-thumb:hover {
+        transform: scale(1.1);
+    }
+
+    .slider-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.6875rem;
+        color: var(--text-muted);
+        margin-top: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .threshold-display {
+        display: flex;
+        align-items: baseline;
+        gap: 2px;
+        background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
+        min-width: 70px;
+        justify-content: center;
+    }
+
+    .threshold-value {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: white;
+    }
+
+    .threshold-label {
+        font-size: 0.875rem;
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    /* Time Picker */
+    .time-picker {
+        flex-shrink: 0;
+    }
+
+    .time-input {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 0.75rem 1rem;
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        cursor: pointer;
+    }
+
+    .time-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    }
+
+    /* Scan Status */
+    .scan-status-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin: 1rem 0;
+    }
+
+    .status-item {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1rem;
+        border-radius: 10px;
+    }
+
+    .status-item.next {
+        background: rgba(99, 102, 241, 0.1);
+        border: 1px solid rgba(99, 102, 241, 0.2);
+    }
+
+    .status-item.last {
+        background: rgba(34, 197, 94, 0.1);
+        border: 1px solid rgba(34, 197, 94, 0.2);
+    }
+
+    .status-icon {
+        font-size: 1.5rem;
+    }
+
+    .status-label {
+        display: block;
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .status-value {
+        display: block;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .action-row {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border-color);
+    }
+
+    /* Folder Grid */
+    .folder-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .folder-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.625rem 1rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: 20px;
+        font-size: 0.875rem;
+        transition: all 0.2s ease;
+    }
+
+    .folder-item:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .folder-item.work {
+        border-left: 3px solid #3b82f6;
+    }
+
+    .folder-item.personal {
+        border-left: 3px solid #8b5cf6;
+    }
+
+    .folder-item.newsletters {
+        border-left: 3px solid #f59e0b;
+    }
+
+    .folder-item.spam {
+        border-left: 3px solid #ef4444;
+    }
+
+    .folder-item.fraud {
+        border-left: 3px solid #dc2626;
+    }
+
+    .folder-icon {
+        font-size: 1rem;
+    }
+
+    .folder-name {
+        font-weight: 500;
+    }
+
+    .folder-help {
+        color: var(--text-secondary);
+        font-size: 0.8125rem;
+        margin: 0;
+    }
+
+    /* Connection Grid */
+    .connection-grid {
+        display: grid;
+        gap: 0.75rem;
+    }
+
+    .connection-item {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1rem;
+        background: var(--bg-secondary);
+        border-radius: 10px;
+        border: 1px solid var(--border-color);
+    }
+
+    .connection-icon {
+        font-size: 1.5rem;
+        width: 40px;
+        text-align: center;
+    }
+
+    .connection-info {
+        flex: 1;
+    }
+
+    .connection-label {
+        display: block;
+        font-size: 0.6875rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 0.25rem;
+    }
+
+    .connection-value {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-weight: 500;
+        color: var(--text-primary);
+    }
+
+    .ssl-badge {
+        background: linear-gradient(135deg, #22c55e, #16a34a);
+        color: white;
+        padding: 0.125rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.625rem;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+
+    /* Form Footer */
+    .form-footer {
+        margin-top: 2rem;
+        text-align: center;
+    }
+
+    .btn-save {
+        padding: 1rem 3rem;
+        font-size: 1rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+    }
+
+    .btn-save:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+    }
+
+    /* Button styles */
+    .btn .btn-icon {
+        margin-right: 0.5rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+        .setting-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.75rem;
+        }
+
+        .sensitivity-control {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .threshold-display {
+            align-self: flex-end;
+        }
+
+        .scan-status-row {
+            grid-template-columns: 1fr;
+        }
+
+        .card-header {
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function updateThreshold(value) {
+        document.getElementById('threshold-value').textContent = value;
+    }
+
+    document.getElementById('btn-scan-now').addEventListener('click', async function () {
+        this.disabled = true;
+        this.innerHTML = '<span class="btn-icon">⏳</span><span class="btn-text">Analisando...</span>';
+        showProgress('🔍 Executando análise de spam e fraude...');
+
+        try {
+            const response = await fetch('/run-scan-now', { method: 'POST' });
+            const data = await response.json();
+
+            hideProgress();
+
+            showToast(`✅ ${data.scanned} analisados, ${data.deleted} excluídos`, 'success');
+
+            setTimeout(() => location.reload(), 1500);
+
+        } catch (error) {
+            hideProgress();
+            await showAlert('Erro ao executar análise: ' + error.message, 'error');
+        }
+
+        this.disabled = false;
+        this.innerHTML = '<span class="btn-icon">🔍</span><span class="btn-text">Executar Análise Agora</span>';
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,13 @@
+{
+  "auto_delete_spam": true,
+  "auto_delete_fraud": true,
+  "spam_threshold": 70,
+  "auto_scan_enabled": true,
+  "auto_scan_time": "12:00",
+  "last_scan": "2026-02-08T20:03:08.581682",
+  "accounts": {
+    "contato@isna.org.br": {
+      "password": "Cristovive12!"
+    }
+  }
+}

@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block title %}E-mails - {{ current_folder }} - Email Organizer{% endblock %}
+
+{% block content %}
+<div class="emails-page">
+    <header class="page-header">
+        <div class="header-title">
+            <h1>
+                {% if 'inbox' in current_folder.lower() %}📥
+                {% elif 'spam' in current_folder.lower() %}🚫
+                {% elif 'fraude' in current_folder.lower() %}⚠️
+                {% else %}📁{% endif %}
+                {{ current_folder }}
+            </h1>
+            <span class="email-count">{{ emails|length }} e-mails</span>
+        </div>
+        <div class="header-actions">
+            <select id="folder-select" class="form-select" onchange="changeFolder(this.value)">
+                {% for folder in folders %}
+                <option value="{{ folder }}" {% if folder==current_folder %}selected{% endif %}>
+                    {{ folder }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </header>
+
+    <div class="emails-toolbar">
+        <label class="checkbox-label">
+            <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
+            <span>Selecionar todos</span>
+        </label>
+        <div class="toolbar-actions">
+            <button class="btn btn-sm btn-outline" onclick="moveSelected()" disabled id="btn-move">
+                <span class="icon">📁</span> Mover
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="deleteSelected()" disabled id="btn-delete">
+                <span class="icon">🗑️</span> Excluir
+            </button>
+        </div>
+    </div>
+
+    <div class="emails-list">
+        {% for email in emails %}
+        <div class="email-item {% if not email.is_read %}unread{% endif %}" data-uid="{{ email.uid }}">
+            <div class="email-checkbox">
+                <input type="checkbox" class="email-select" value="{{ email.uid }}" onchange="updateToolbar()">
+            </div>
+            <a href="{{ url_for('view_email', folder=current_folder, uid=email.uid) }}" class="email-link">
+                <div class="email-from" title="{{ email.from }}">
+                    {{ email.from[:40] }}{% if email.from|length > 40 %}...{% endif %}
+                </div>
+                <div class="email-subject">
+                    {% if not email.is_read %}<span class="unread-dot"></span>{% endif %}
+                    {{ email.subject[:60] }}{% if email.subject|length > 60 %}...{% endif %}
+                </div>
+                <div class="email-date">
+                    {{ email.date[:22] if email.date else 'Sem data' }}
+                </div>
+            </a>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <span class="empty-icon">📭</span>
+            <h3>Nenhum e-mail encontrado</h3>
+            <p>Esta pasta está vazia</p>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Modal de Mover -->
+<div id="move-modal" class="modal hidden">
+    <div class="modal-overlay" onclick="closeMoveModal()"></div>
+    <div class="modal-content modal-sm">
+        <div class="modal-header">
+            <h3>Mover para...</h3>
+            <button class="modal-close" onclick="closeMoveModal()">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="folder-options">
+                {% for folder in folders %}
+                {% if folder != current_folder %}
+                <button class="folder-option" onclick="moveToFolder('{{ folder }}')">
+                    <span class="folder-icon">📁</span>
+                    {{ folder }}
+                </button>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    function changeFolder(folder) {
+        window.location.href = '/emails/' + encodeURIComponent(folder);
+    }
+
+    function toggleSelectAll() {
+        const selectAll = document.getElementById('select-all');
+        document.querySelectorAll('.email-select').forEach(cb => {
+            cb.checked = selectAll.checked;
+        });
+        updateToolbar();
+    }
+
+    function updateToolbar() {
+        const selected = document.querySelectorAll('.email-select:checked');
+        document.getElementById('btn-move').disabled = selected.length === 0;
+        document.getElementById('btn-delete').disabled = selected.length === 0;
+    }
+
+    function getSelectedUids() {
+        return Array.from(document.querySelectorAll('.email-select:checked')).map(cb => cb.value);
+    }
+
+    function moveSelected() {
+        if (getSelectedUids().length === 0) return;
+        document.getElementById('move-modal').classList.remove('hidden');
+    }
+
+    function closeMoveModal() {
+        document.getElementById('move-modal').classList.add('hidden');
+    }
+
+    async function moveToFolder(folder) {
+        const uids = getSelectedUids();
+        if (uids.length === 0) return;
+
+        try {
+            // Esta funcionalidade requer implementação adicional no backend
+            showToast(`Movendo ${uids.length} e-mails para ${folder}...`, 'info');
+            closeMoveModal();
+            location.reload();
+        } catch (error) {
+            await showAlert('Erro ao mover e-mails: ' + error.message, 'error');
+        }
+    }
+
+    async function deleteSelected() {
+        const uids = getSelectedUids();
+        if (uids.length === 0) return;
+
+        const confirmed = await showConfirm(
+            `Tem certeza que deseja excluir ${uids.length} e-mails?`,
+            { title: 'Excluir E-mails', confirmText: 'Excluir', isDanger: true }
+        );
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch('/delete-spam', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uids: uids })
+            });
+            const data = await response.json();
+
+            showToast(`${data.deleted} e-mails excluídos!`, 'success');
+            location.reload();
+        } catch (error) {
+            await showAlert('Erro ao excluir e-mails: ' + error.message, 'error');
+        }
+    }
+</script>
+{% endblock %}

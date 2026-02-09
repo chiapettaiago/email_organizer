@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}{{ email.subject }} - Email Organizer{% endblock %}
+
+{% block content %}
+<div class="view-email-page">
+    <header class="page-header">
+        <a href="{{ url_for('emails', folder=folder) }}" class="back-link">
+            <span class="icon">←</span> Voltar para {{ folder }}
+        </a>
+    </header>
+
+    <article class="email-view">
+        <header class="email-header">
+            <h1 class="email-subject">{{ email.subject }}</h1>
+            <div class="email-meta">
+                <div class="email-from-to">
+                    <p><strong>De:</strong> {{ email.from }}</p>
+                    {% if email.to %}
+                    <p><strong>Para:</strong> {{ email.to }}</p>
+                    {% endif %}
+                </div>
+                <div class="email-date">
+                    <span>{{ email.date }}</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="email-actions">
+            <button class="btn btn-outline btn-sm" onclick="analyzeEmail()">
+                <span class="icon">🔍</span> Analisar
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="moveEmail()">
+                <span class="icon">📁</span> Mover
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="deleteEmail()">
+                <span class="icon">🗑️</span> Excluir
+            </button>
+        </div>
+
+        <div class="email-body">
+            {{ email.body | safe }}
+        </div>
+    </article>
+
+    <!-- Modal de Análise -->
+    <div id="analysis-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeAnalysisModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Análise de Segurança</h3>
+                <button class="modal-close" onclick="closeAnalysisModal()">×</button>
+            </div>
+            <div class="modal-body" id="analysis-body">
+                <div class="loading">Analisando...</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function analyzeEmail() {
+        document.getElementById('analysis-modal').classList.remove('hidden');
+        document.getElementById('analysis-body').innerHTML = '<div class="loading">Analisando...</div>';
+
+        try {
+            const response = await fetch('/scan', { method: 'POST' });
+            const data = await response.json();
+
+            // Encontra este e-mail nos resultados
+            const thisEmail = data.items.find(item => item.uid === '{{ email.uid }}');
+
+            let html = '';
+            if (thisEmail) {
+                const statusClass = thisEmail.is_fraud ? 'danger' : (thisEmail.is_spam ? 'warning' : 'success');
+                const statusText = thisEmail.is_fraud ? '⚠️ Fraude Detectada' :
+                    (thisEmail.is_spam ? '🚫 Spam Detectado' : '✅ E-mail Seguro');
+
+                html = `
+                <div class="analysis-result">
+                    <div class="analysis-status status-${statusClass}">
+                        <span class="status-icon">${statusText}</span>
+                        <span class="status-score">Score: ${thisEmail.score}/100</span>
+                    </div>
+                    ${thisEmail.reasons.length > 0 ? `
+                        <div class="analysis-reasons">
+                            <h4>Motivos:</h4>
+                            <ul>
+                                ${thisEmail.reasons.map(r => `<li>${r}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            } else {
+                html = `
+                <div class="analysis-result">
+                    <div class="analysis-status status-success">
+                        <span class="status-icon">✅ E-mail Seguro</span>
+                        <span class="status-score">Nenhuma ameaça detectada</span>
+                    </div>
+                </div>
+            `;
+            }
+
+            document.getElementById('analysis-body').innerHTML = html;
+
+        } catch (error) {
+            document.getElementById('analysis-body').innerHTML =
+                '<div class="error">Erro ao analisar e-mail: ' + error.message + '</div>';
+        }
+    }
+
+    function closeAnalysisModal() {
+        document.getElementById('analysis-modal').classList.add('hidden');
+    }
+
+    async function moveEmail() {
+        await showAlert('Funcionalidade de mover disponível na lista de e-mails', 'info');
+        window.location.href = '{{ url_for("emails", folder=folder) }}';
+    }
+
+    async function deleteEmail() {
+        const confirmed = await showConfirm(
+            'Tem certeza que deseja excluir este e-mail?',
+            { title: 'Excluir E-mail', confirmText: 'Excluir', isDanger: true }
+        );
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch('/delete-spam', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uids: ['{{ email.uid }}'] })
+            });
+            const data = await response.json();
+
+            if (data.deleted > 0) {
+                showToast('E-mail excluído!', 'success');
+                window.location.href = '{{ url_for("emails", folder=folder) }}';
+            } else {
+                await showAlert('Erro ao excluir e-mail', 'error');
+            }
+        } catch (error) {
+            await showAlert('Erro: ' + error.message, 'error');
+        }
+    }
+</script>
+{% endblock %}

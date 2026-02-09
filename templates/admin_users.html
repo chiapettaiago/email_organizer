@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+
+{% block title %}Gerenciar Usuários - Email Organizer{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>👥 Gerenciar Usuários</h1>
+</div>
+
+<!-- Formulário para criar usuário -->
+<div class="admin-section">
+    <h2>➕ Criar Novo Usuário</h2>
+    <form method="POST" class="user-form">
+        <input type="hidden" name="action" value="create">
+        <div class="form-row">
+            <div class="form-group">
+                <label for="username">Usuário</label>
+                <input type="text" id="username" name="username" required placeholder="Nome de usuário"
+                    class="form-input">
+            </div>
+            <div class="form-group">
+                <label for="email">E-mail</label>
+                <input type="email" id="email" name="email" placeholder="email@exemplo.com" class="form-input">
+            </div>
+            <div class="form-group">
+                <label for="password">Senha</label>
+                <input type="password" id="password" name="password" required placeholder="Senha" class="form-input">
+            </div>
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" name="is_admin">
+                    <span>Administrador</span>
+                </label>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">
+            <span>Criar Usuário</span>
+        </button>
+    </form>
+</div>
+
+<!-- Lista de usuários -->
+<div class="admin-section">
+    <h2>📋 Usuários Cadastrados</h2>
+
+    {% if users %}
+    <div class="users-table-wrapper">
+        <table class="users-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Usuário</th>
+                    <th>E-mail</th>
+                    <th>Admin</th>
+                    <th>Status</th>
+                    <th>Criado em</th>
+                    <th>Último Login</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr class="{% if not user.is_active %}user-inactive{% endif %}">
+                    <td>{{ user.id }}</td>
+                    <td>
+                        <strong>{{ user.username }}</strong>
+                        {% if user.username == current_user %}
+                        <span class="badge badge-info">Você</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ user.email or '-' }}</td>
+                    <td>
+                        {% if user.is_admin %}
+                        <span class="badge badge-success">Admin</span>
+                        {% else %}
+                        <span class="badge badge-secondary">Usuário</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user.is_active %}
+                        <span class="status-dot active"></span> Ativo
+                        {% else %}
+                        <span class="status-dot inactive"></span> Inativo
+                        {% endif %}
+                    </td>
+                    <td>{{ user.created_at.strftime('%d/%m/%Y') if user.created_at else '-' }}</td>
+                    <td>{{ user.last_login.strftime('%d/%m/%Y %H:%M') if user.last_login else 'Nunca' }}</td>
+                    <td class="actions-cell">
+                        {% if user.username != current_user %}
+                        <form method="POST" style="display: inline;">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="user_id" value="{{ user.id }}">
+                            <button type="submit" class="btn btn-sm btn-secondary"
+                                title="{% if user.is_active %}Desativar{% else %}Ativar{% endif %}">
+                                {% if user.is_active %}🚫{% else %}✅{% endif %}
+                            </button>
+                        </form>
+                        <form method="POST" style="display: inline;" class="delete-user-form"
+                            data-username="{{ user.username }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="username" value="{{ user.username }}">
+                            <button type="submit" class="btn btn-sm btn-danger" title="Excluir">🗑️</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <span class="empty-icon">👤</span>
+        <h3>Nenhum usuário encontrado</h3>
+        <p>Crie o primeiro usuário acima.</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .admin-section {
+        background: var(--bg-card);
+        border-radius: var(--border-radius);
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        border: 1px solid var(--border-color);
+    }
+
+    .admin-section h2 {
+        font-size: 1.125rem;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+        color: var(--text-primary);
+    }
+
+    .user-form .form-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+    .form-input {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--border-radius-sm);
+        color: var(--text-primary);
+        font-size: 0.9375rem;
+    }
+
+    .form-input:focus {
+        outline: none;
+        border-color: var(--accent-primary);
+        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+    }
+
+    .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        cursor: pointer;
+        padding-top: 1.5rem;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--accent-primary);
+    }
+
+    .users-table-wrapper {
+        overflow-x: auto;
+    }
+
+    .users-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .users-table th,
+    .users-table td {
+        padding: 0.875rem 1rem;
+        text-align: left;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .users-table th {
+        background: var(--bg-secondary);
+        font-weight: 600;
+        color: var(--text-secondary);
+        font-size: 0.8125rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .users-table tbody tr:hover {
+        background: var(--bg-secondary);
+    }
+
+    .user-inactive {
+        opacity: 0.6;
+    }
+
+    .badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+
+    .badge-success {
+        background: rgba(34, 197, 94, 0.2);
+        color: var(--success);
+    }
+
+    .badge-secondary {
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+    }
+
+    .badge-info {
+        background: rgba(59, 130, 246, 0.2);
+        color: var(--info);
+        margin-left: 0.5rem;
+    }
+
+    .status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 0.5rem;
+    }
+
+    .status-dot.active {
+        background: var(--success);
+    }
+
+    .status-dot.inactive {
+        background: var(--danger);
+    }
+
+    .actions-cell {
+        white-space: nowrap;
+    }
+
+    .actions-cell .btn {
+        margin-right: 0.25rem;
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Intercepta submits de exclusão para usar modal
+    document.querySelectorAll('.delete-user-form').forEach(form => {
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const username = this.dataset.username;
+            const confirmed = await showConfirm(
+                `Tem certeza que deseja excluir o usuário "${username}"?`,
+                { title: 'Excluir Usuário', confirmText: 'Excluir', isDanger: true }
+            );
+
+            if (confirmed) {
+                this.submit();
+            }
+        });
+    });
+</script>
+{% endblock %}

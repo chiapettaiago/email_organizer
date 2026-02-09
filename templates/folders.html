@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Pastas - Email Organizer{% endblock %}
+
+{% block content %}
+<div class="folders-page">
+    <header class="page-header">
+        <h1>📁 Gerenciar Pastas</h1>
+    </header>
+
+    <div class="folders-grid">
+        <section class="create-folder-section">
+            <h2>Criar Nova Pasta</h2>
+            <form method="POST" class="create-folder-form">
+                <input type="hidden" name="action" value="create">
+                <div class="form-row">
+                    <input type="text" name="folder_name" placeholder="Nome da pasta" class="form-input" required>
+                    <button type="submit" class="btn btn-primary">
+                        <span class="icon">➕</span> Criar
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <section class="folders-list-section">
+            <h2>Pastas Existentes</h2>
+            <div class="folders-grid-list">
+                {% for folder in folders %}
+                <div class="folder-card">
+                    <div class="folder-info">
+                        <span class="folder-icon">
+                            {% if 'inbox' in folder.lower() %}📥
+                            {% elif 'spam' in folder.lower() %}🚫
+                            {% elif 'fraude' in folder.lower() %}⚠️
+                            {% elif 'trabalho' in folder.lower() %}💼
+                            {% elif 'pessoal' in folder.lower() %}👤
+                            {% elif 'newsletter' in folder.lower() %}📰
+                            {% elif 'trash' in folder.lower() or 'lixeira' in folder.lower() %}🗑️
+                            {% elif 'sent' in folder.lower() or 'enviado' in folder.lower() %}📤
+                            {% elif 'draft' in folder.lower() or 'rascunho' in folder.lower() %}📝
+                            {% else %}📁{% endif %}
+                        </span>
+                        <span class="folder-name">{{ folder }}</span>
+                    </div>
+                    <div class="folder-actions">
+                        <a href="{{ url_for('emails', folder=folder) }}" class="btn btn-sm btn-outline">
+                            Abrir
+                        </a>
+                        {% if folder not in ['INBOX', 'Sent', 'Trash', 'Drafts', 'Junk'] %}
+                        <form method="POST" class="delete-folder-form" data-folder="{{ folder }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="folder_name" value="{{ folder }}">
+                            <button type="submit" class="btn btn-sm btn-danger">
+                                🗑️
+                            </button>
+                        </form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <p class="empty-message">Nenhuma pasta encontrada</p>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.querySelectorAll('.delete-folder-form').forEach(form => {
+        form.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const folder = this.dataset.folder;
+            const confirmed = await showConfirm(
+                `Excluir a pasta "${folder}"?`,
+                { title: 'Excluir Pasta', confirmText: 'Excluir', isDanger: true }
+            );
+
+            if (confirmed) {
+                this.submit();
+            }
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Email Organizer</title>
+    <meta name="description" content="Faça login para acessar o organizador de e-mails">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body class="dark-theme login-page">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-logo">
+                    <span class="logo-icon">📧</span>
+                </div>
+                <h1>Email Organizer</h1>
+                <p class="login-subtitle">Organize seus e-mails de forma inteligente</p>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">
+                {{ message }}
+            </div>
+            {% endfor %}
+            {% endif %}
+            {% endwith %}
+
+            <form method="POST" class="login-form">
+                <div class="form-group">
+                    <label for="username">Usuário</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">👤</span>
+                        <input type="text" id="username" name="username" placeholder="Digite seu usuário" required
+                            autocomplete="username" autofocus>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Senha</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔒</span>
+                        <input type="password" id="password" name="password" placeholder="Digite sua senha" required
+                            autocomplete="current-password">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block">
+                    <span class="btn-text">Entrar</span>
+                    <span class="btn-icon">→</span>
+                </button>
+            </form>
+
+            <div class="login-footer">
+                <p class="security-note">
+                    🔐 Conexão segura SSL/TLS
+                </p>
+            </div>
+        </div>
+
+        <div class="login-features">
+            <div class="feature">
+                <span class="feature-icon">🛡️</span>
+                <h3>Detecção de Spam</h3>
+                <p>Identifica e-mails indesejados automaticamente</p>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">⚠️</span>
+                <h3>Proteção contra Fraude</h3>
+                <p>Detecta tentativas de phishing e golpes</p>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📁</span>
+                <h3>Organização Automática</h3>
+                <p>Categoriza e-mails em pastas inteligentes</p>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
