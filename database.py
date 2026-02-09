@@ -1,8 +1,9 @@
 # Módulo de Banco de Dados - MySQL
 # =================================
 
-import mysql.connector
-from mysql.connector import Error
+import pymysql
+from pymysql import Error
+import pymysql.cursors
 import bcrypt
 import os
 
@@ -13,16 +14,14 @@ DB_CONFIG = {
     'user': os.getenv('DB_USER', 'organizer'),
     'password': os.getenv('DB_PASSWORD', 'xPX4MWSW7XEyAhph'),
     'database': os.getenv('DB_NAME', 'organizer'),
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_general_ci',
-    'ssl_disabled': True
+    'charset': 'utf8mb4'
 }
 
 
 def get_connection():
     """Cria e retorna uma conexão com o banco de dados"""
     try:
-        connection = mysql.connector.connect(**DB_CONFIG)
+        connection = pymysql.connect(**DB_CONFIG)
         return connection
     except Error as e:
         print(f"Erro ao conectar ao MySQL: {e}")
@@ -34,7 +33,7 @@ def init_database():
     try:
         # Conecta sem especificar database para criar se não existir
         config_without_db = {k: v for k, v in DB_CONFIG.items() if k != 'database'}
-        connection = mysql.connector.connect(**config_without_db)
+        connection = pymysql.connect(**config_without_db)
         cursor = connection.cursor()
         
         # Cria o banco de dados se não existir
@@ -110,7 +109,7 @@ def verify_user(username: str, password: str) -> dict:
         return None
     
     try:
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
         
         cursor.execute(
             "SELECT id, username, password_hash, email, is_admin, is_active FROM users WHERE username = %s",
@@ -155,7 +154,7 @@ def get_all_users() -> list:
         return []
     
     try:
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor(pymysql.cursors.DictCursor)
         cursor.execute("SELECT id, username, email, is_admin, is_active, created_at, last_login FROM users ORDER BY created_at DESC")
         users = cursor.fetchall()
         cursor.close()
