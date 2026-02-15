@@ -8,55 +8,77 @@
     <meta name="description" content="Organizador inteligente de e-mails com detecção de spam e fraude">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 
-<body class="dark-theme">
+<body class="gmail-theme">
     {% if email %}
+    <!-- Desktop topbar -->
+    <header class="desktop-topbar">
+        <div class="desktop-topbar-left">
+            <button class="topbar-menu-btn" data-toggle-sidebar aria-label="Alternar menu">☰</button>
+            <a href="{{ url_for('emails') }}" class="topbar-brand">
+                <span class="topbar-brand-logo">✉</span>
+                <span class="topbar-brand-text">Gmail Organizer</span>
+            </a>
+        </div>
+        <div class="topbar-search-wrap">
+            <button class="topbar-search-icon" type="button" aria-label="Pesquisar">🔍</button>
+            <input class="topbar-search-input" type="search" placeholder="Pesquisar e-mails">
+            <button class="topbar-search-filter" type="button" aria-label="Filtros">⚙</button>
+        </div>
+        <div class="desktop-topbar-right">
+            <a href="{{ url_for('settings') }}" class="topbar-icon-btn" aria-label="Configurações">⚙</a>
+            <a href="{{ url_for('logout') }}" class="topbar-icon-btn" aria-label="Sair">⎋</a>
+            <a href="{{ url_for('settings') }}" class="topbar-avatar" aria-label="Perfil">{{ email[0]|upper }}</a>
+        </div>
+    </header>
+
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-header">
             <div class="sidebar-brand">
-                <span class="logo">📧</span>
-                <span class="brand-text">Email Organizer</span>
+                <span class="logo">✉</span>
+                <span class="brand-text">Caixa de Entrada</span>
             </div>
-            <button class="sidebar-toggle" id="sidebar-toggle" title="Recolher menu">
-                <span>☰</span>
-            </button>
         </div>
 
         <nav class="sidebar-nav">
+            <a href="{{ url_for('emails') }}" class="gmail-compose-btn">
+                <span class="gmail-compose-icon">✎</span>
+                <span class="gmail-compose-text">Escrever</span>
+            </a>
             <a href="{{ url_for('dashboard') }}"
                 class="sidebar-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
-                <span class="sidebar-icon">📊</span>
+                <span class="sidebar-icon">⌂</span>
                 <span class="sidebar-text">Dashboard</span>
             </a>
             <a href="{{ url_for('emails') }}"
-                class="sidebar-link {% if request.endpoint == 'emails' %}active{% endif %}">
-                <span class="sidebar-icon">📬</span>
+                class="sidebar-link {% if request.endpoint in ['emails', 'view_email'] %}active{% endif %}">
+                <span class="sidebar-icon">✉</span>
                 <span class="sidebar-text">E-mails</span>
             </a>
             <a href="{{ url_for('folders') }}"
                 class="sidebar-link {% if request.endpoint == 'folders' %}active{% endif %}">
-                <span class="sidebar-icon">📁</span>
+                <span class="sidebar-icon">▦</span>
                 <span class="sidebar-text">Pastas</span>
             </a>
             <a href="{{ url_for('analise_interativa') }}"
                 class="sidebar-link {% if request.endpoint == 'analise_interativa' %}active{% endif %}">
-                <span class="sidebar-icon">🔍</span>
+                <span class="sidebar-icon">⚠</span>
                 <span class="sidebar-text">Análise</span>
             </a>
             <a href="{{ url_for('settings') }}"
                 class="sidebar-link {% if request.endpoint == 'settings' %}active{% endif %}">
-                <span class="sidebar-icon">⚙️</span>
+                <span class="sidebar-icon">⚙</span>
                 <span class="sidebar-text">Configurações</span>
             </a>
             {% if session.get('is_admin') %}
             <a href="{{ url_for('admin_users') }}"
                 class="sidebar-link {% if request.endpoint == 'admin_users' %}active{% endif %}">
-                <span class="sidebar-icon">👥</span>
+                <span class="sidebar-icon">◉</span>
                 <span class="sidebar-text">Usuários</span>
             </a>
             {% endif %}
@@ -71,7 +93,7 @@
                 </div>
             </div>
             <a href="{{ url_for('logout') }}" class="sidebar-link logout-link">
-                <span class="sidebar-icon">🚪</span>
+                <span class="sidebar-icon">⎋</span>
                 <span class="sidebar-text">Sair</span>
             </a>
         </div>
@@ -81,10 +103,40 @@
     <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
     <!-- Mobile header -->
-    <header class="mobile-header">
-        <button class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
-        <span class="mobile-title">📧 Email Organizer</span>
+    <header class="mobile-header gmail-mobile-header">
+        <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Abrir menu">☰</button>
+        <button class="mobile-search-pill" type="button" onclick="window.location.href='{{ url_for('emails') }}'">
+            <span class="mobile-search-icon">🔍</span>
+            <span class="mobile-search-text">Pesquisar no e-mail</span>
+        </button>
+        <button class="mobile-profile-btn" type="button" onclick="window.location.href='{{ url_for('settings') }}'" aria-label="Perfil">
+            {{ email[0]|upper }}
+        </button>
     </header>
+
+    <!-- Mobile bottom navigation -->
+    <nav class="mobile-bottom-nav">
+        <a href="{{ url_for('emails') }}"
+            class="mobile-bottom-link {% if request.endpoint in ['emails', 'view_email'] %}active{% endif %}">
+            <span class="mobile-bottom-icon">📥</span>
+            <span class="mobile-bottom-text">E-mail</span>
+        </a>
+        <a href="{{ url_for('folders') }}"
+            class="mobile-bottom-link {% if request.endpoint == 'folders' %}active{% endif %}">
+            <span class="mobile-bottom-icon">📁</span>
+            <span class="mobile-bottom-text">Pastas</span>
+        </a>
+        <a href="{{ url_for('analise_interativa') }}"
+            class="mobile-bottom-link {% if request.endpoint == 'analise_interativa' %}active{% endif %}">
+            <span class="mobile-bottom-icon">🔍</span>
+            <span class="mobile-bottom-text">Análise</span>
+        </a>
+        <a href="{{ url_for('settings') }}"
+            class="mobile-bottom-link {% if request.endpoint == 'settings' %}active{% endif %}">
+            <span class="mobile-bottom-icon">⚙️</span>
+            <span class="mobile-bottom-text">Config</span>
+        </a>
+    </nav>
     {% endif %}
 
     <main class="main-content {% if email %}has-sidebar{% endif %}">
@@ -108,20 +160,49 @@
     <script>
         // Sidebar toggle functionality
         const sidebar = document.getElementById('sidebar');
-        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const sidebarToggleButtons = document.querySelectorAll('[data-toggle-sidebar]');
         const sidebarOverlay = document.getElementById('sidebar-overlay');
         const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const DESKTOP_BREAKPOINT = 1025;
 
-        if (sidebarToggle) {
-            sidebarToggle.addEventListener('click', () => {
-                sidebar.classList.toggle('collapsed');
-                localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
-            });
+        const isDesktopViewport = () => window.innerWidth >= DESKTOP_BREAKPOINT;
 
-            // Restore state
-            if (localStorage.getItem('sidebarCollapsed') === 'true') {
-                sidebar.classList.add('collapsed');
+        const closeMobileSidebar = () => {
+            if (!sidebar) return;
+            sidebar.classList.remove('mobile-open');
+            if (sidebarOverlay) {
+                sidebarOverlay.classList.remove('active');
             }
+        };
+
+        const applySidebarViewportState = () => {
+            if (!sidebar) return;
+            if (isDesktopViewport()) {
+                const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+                sidebar.classList.toggle('collapsed', isCollapsed);
+                closeMobileSidebar();
+                return;
+            }
+            sidebar.classList.remove('collapsed');
+            closeMobileSidebar();
+        };
+
+        if (sidebarToggleButtons.length > 0 && sidebar) {
+            sidebarToggleButtons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    if (isDesktopViewport()) {
+                        sidebar.classList.toggle('collapsed');
+                        localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+                        return;
+                    }
+                    sidebar.classList.add('mobile-open');
+                    if (sidebarOverlay) {
+                        sidebarOverlay.classList.add('active');
+                    }
+                });
+            });
+            applySidebarViewportState();
+            window.addEventListener('resize', applySidebarViewportState);
         }
 
         if (mobileMenuBtn) {
@@ -133,8 +214,7 @@
 
         if (sidebarOverlay) {
             sidebarOverlay.addEventListener('click', () => {
-                sidebar.classList.remove('mobile-open');
-                sidebarOverlay.classList.remove('active');
+                closeMobileSidebar();
             });
         }
     </script>

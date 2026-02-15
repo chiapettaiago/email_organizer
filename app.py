@@ -3,15 +3,18 @@
 
 import os
 import json
+import re
 from datetime import datetime
+from html import escape
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from functools import wraps
+from markupsafe import Markup
 from email_service.connection import EmailConnection
 from email_service.spam_detector import SpamDetector
 from email_service.folder_manager import FolderManager
 from apscheduler.schedulers.background import BackgroundScheduler
 from config import LOCAWEB_CONFIG
-from database import verify_user, init_database, create_user, get_all_users, delete_user, toggle_user_status
+from database import create_user, get_all_users, delete_user, toggle_user_status
 import secrets
 import atexit
 
@@ -66,6 +69,176 @@ def save_config(config):
     """Salva configurações no arquivo JSON"""
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
+
+
+def get_admin_emails():
+    """Retorna e-mails com permissão administrativa"""
+    admin_emails = {
+        item.strip().lower()
+        for item in os.getenv('ADMIN_EMAILS', '').split(',')
+        if item.strip()
+    }
+    default_admin = LOCAWEB_CONFIG.get('DEFAULT_EMAIL', '').strip().lower()
+    if default_admin:
+        admin_emails.add(default_admin)
+    return admin_emails
+
+
+def is_admin_email(email_address: str) -> bool:
+    """Verifica se o e-mail possui acesso administrativo"""
+    return email_address.strip().lower() in get_admin_emails()
+
+
+def parse_emails_field(raw_value: str):
+    """Normaliza campo de destinatários separado por vírgula"""
+    if not raw_value:
+        return []
+    return [item.strip() for item in raw_value.split(',') if item.strip()]
+
+
+HTML_TAG_PATTERN = re.compile(r'<[a-zA-Z][^>]*>')
+REPLY_HEADER_PATTERN = re.compile(r'^em\s+.+\sescreveu:\s*$', re.IGNORECASE)
+
+
+def body_looks_like_html(body_text: str) -> bool:
+    """Detecta se o corpo já está em HTML"""
+    if not body_text:
+        return False
+    return bool(HTML_TAG_PATTERN.search(body_text))
+
+
+def normalize_plain_email_text(body_text: str) -> str:
+    """Normaliza texto plano de e-mail para melhorar leitura"""
+    text = (body_text or '').replace('\r\n', '\n').replace('\r', '\n')
+
+    # Alguns servidores retornam citações inline como " > " sem quebra de linha.
+    if text.count('\n') < 3 and ' > ' in text:
+        text = re.sub(r'\s+>\s*', '\n> ', text)
+
+    # Separa headers de resposta e assinatura legal em mensagens compactadas.
+    text = re.sub(
+        r'([.!?,])\s+(Em [^\n]{8,220} escreveu:\s*)',
+        r'\1\n\n\2',
+        text,
+        flags=re.IGNORECASE
+    )
+    text = re.sub(r'(\bescreveu:\s*)>\s*', r'\1\n> ', text, flags=re.IGNORECASE)
+    text = re.sub(
+        r'\s+--\s*(?=(\*?\s*(aviso legal|disclaimer)))',
+        '\n\n-- ',
+        text,
+        flags=re.IGNORECASE
+    )
+
+    # Remove excesso de linhas em branco mantendo separação visual.
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def plain_email_to_html(body_text: str) -> str:
+    """Converte corpo em texto plano para HTML sem perder estrutura"""
+    lines = normalize_plain_email_text(body_text).split('\n')
+
+    if not lines or (len(lines) == 1 and not lines[0].strip()):
+        return '<p class="email-empty">Sem conteúdo no corpo da mensagem.</p>'
+
+    html_parts = []
+    paragraph_lines = []
+    quote_lines = []
+    signature_lines = []
+    in_signature = False
+
+    def flush_paragraph():
+        if paragraph_lines:
+            content = '<br>'.join(escape(item) for item in paragraph_lines if item.strip())
+            if content:
+                html_parts.append(f'<p>{content}</p>')
+            paragraph_lines.clear()
+
+    def flush_quote():
+        if quote_lines:
+            content = '<br>'.join(escape(item) for item in quote_lines if item.strip())
+            if content:
+                html_parts.append(f'<blockquote class="email-quote">{content}</blockquote>')
+            quote_lines.clear()
+
+    def first_signature_marker(line_lower: str):
+        markers = ['aviso legal', 'disclaimer']
+        indexes = [line_lower.find(marker) for marker in markers if marker in line_lower]
+        if not indexes:
+            return -1
+        return min(indexes)
+
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        line_clean = line.strip()
+        line_lower = line_clean.lower()
+
+        if not line_clean:
+            flush_paragraph()
+            flush_quote()
+            continue
+
+        if not in_signature and REPLY_HEADER_PATTERN.match(line_clean):
+            flush_paragraph()
+            flush_quote()
+            html_parts.append(f'<div class="email-reply-header">{escape(line_clean)}</div>')
+            continue
+
+        if not in_signature and line_clean.startswith('--'):
+            flush_paragraph()
+            flush_quote()
+            in_signature = True
+            signature_lines.append(line_clean)
+            continue
+
+        marker_index = -1 if in_signature else first_signature_marker(line_lower)
+        if marker_index >= 0:
+            prefix = line_clean[:marker_index].strip()
+            signature_piece = line_clean[marker_index:].strip()
+            if prefix:
+                paragraph_lines.append(prefix)
+            flush_paragraph()
+            flush_quote()
+            in_signature = True
+            if signature_piece:
+                signature_lines.append(signature_piece)
+            continue
+
+        if in_signature:
+            signature_lines.append(line_clean)
+            continue
+
+        if line_clean.startswith('>'):
+            flush_paragraph()
+            quote_text = re.sub(r'^(>\s*)+', '', line_clean)
+            quote_lines.append(quote_text)
+            continue
+
+        flush_quote()
+        paragraph_lines.append(line_clean)
+
+    flush_paragraph()
+    flush_quote()
+
+    if signature_lines:
+        signature_html = '<br>'.join(escape(item.strip()) for item in signature_lines if item.strip())
+        if signature_html:
+            html_parts.append(f'<div class="email-signature">{signature_html}</div>')
+
+    return ''.join(html_parts) if html_parts else '<p class="email-empty">Sem conteúdo no corpo da mensagem.</p>'
+
+
+def format_email_body_for_display(body_text: str):
+    """Gera HTML formatado para exibição do corpo da mensagem"""
+    body = (body_text or '').strip()
+    if not body:
+        return Markup('<p class="email-empty">Sem conteúdo no corpo da mensagem.</p>'), False
+
+    if body_looks_like_html(body):
+        return Markup(body), True
+
+    return Markup(plain_email_to_html(body)), False
 
 
 def scheduled_scan():
@@ -185,55 +358,59 @@ def index():
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """Página de login com usuário e senha (MySQL)"""
-    # Email configurado como padrão
+    """Login usando e-mail e senha da conta de e-mail"""
     default_email = LOCAWEB_CONFIG.get('DEFAULT_EMAIL', 'contato@isna.org.br')
     
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
+        email_address = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
         
-        print(f"[LOGIN] Tentativa: username='{username}'")
+        print(f"[LOGIN] Tentativa para: {email_address}")
         
-        if not username or not password:
-            flash('Por favor, preencha usuário e senha.', 'error')
-            return render_template('login.html')
-        
-        # Verifica credenciais no banco de dados MySQL
-        user = verify_user(username, password)
-        print(f"[LOGIN] Resultado verify_user: {user}")
-        
-        if user:
-            # Usa email do usuário ou o padrão
-            email = user.get('email') or default_email
-            
-            session['user_id'] = user['id']
-            session['username'] = user['username']
-            session['email'] = email
-            
-            # Carrega senha do email das configurações
+        if not email_address or not password:
+            flash('Por favor, preencha e-mail e senha.', 'error')
+            return render_template('login.html', default_email=default_email)
+
+        conn = EmailConnection(
+            email_address, password,
+            LOCAWEB_IMAP_SERVER, LOCAWEB_IMAP_PORT,
+            LOCAWEB_SMTP_SERVER, LOCAWEB_SMTP_PORT
+        )
+
+        if conn.connect():
+            conn.disconnect()
+
+            session['user_id'] = email_address
+            session['username'] = email_address.split('@')[0]
+            session['email'] = email_address
+            session['password'] = password
+            session['is_admin'] = is_admin_email(email_address)
+
+            # Mantém conta salva para automações agendadas
             config = load_config()
             accounts = config.get('accounts', {})
-            if email in accounts:
-                session['password'] = accounts[email].get('password', '')
-            
-            session['is_admin'] = user.get('is_admin', False)
-            
+            accounts[email_address] = {
+                'password': password,
+                'last_login': datetime.now().isoformat()
+            }
+            config['accounts'] = accounts
+            save_config(config)
+
             print(f"[LOGIN] Sucesso! Redirecionando para dashboard")
-            flash(f'Bem-vindo, {username}!', 'success')
+            flash(f'Bem-vindo, {email_address}!', 'success')
             return redirect(url_for('dashboard'))
-        else:
-            print(f"[LOGIN] Falha: usuário ou senha incorretos")
-            flash('Usuário ou senha inválidos.', 'error')
+        
+        print("[LOGIN] Falha: e-mail ou senha inválidos")
+        flash('Falha na autenticação do e-mail. Verifique as credenciais.', 'error')
     
-    return render_template('login.html')
+    return render_template('login.html', default_email=default_email)
 
 
 def admin_required(f):
     """Decorator para rotas que requerem acesso de administrador"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'username' not in session:
+        if 'email' not in session:
             flash('Por favor, faça login.', 'error')
             return redirect(url_for('login'))
         if not session.get('is_admin', False):
@@ -345,16 +522,29 @@ def view_email(folder, uid):
     """Visualiza um e-mail específico"""
     conn = get_email_connection()
     email_data = None
+    folders = []
     
     if conn and conn.connect():
         email_data = conn.fetch_email_by_uid(folder, uid)
+        folders = conn.list_folders()
+        conn.set_read_status(uid, folder, True)
         conn.disconnect()
     
     if not email_data:
         flash('E-mail não encontrado.', 'error')
         return redirect(url_for('emails', folder=folder))
+
+    body_html, body_is_html = format_email_body_for_display(email_data.get('body', ''))
+    email_data['body_formatted'] = body_html
+    email_data['body_is_html'] = body_is_html
     
-    return render_template('view_email.html', email=email_data, folder=folder)
+    return render_template(
+        'view_email.html',
+        message=email_data,
+        folder=folder,
+        folders=folders,
+        email=session.get('email')
+    )
 
 
 @app.route('/scan', methods=['POST'])
@@ -437,19 +627,116 @@ def organize_emails():
 def delete_spam():
     """Move e-mails de spam/fraude para a lixeira"""
     conn = get_email_connection()
-    uids = request.json.get('uids', [])
+    payload = request.get_json(silent=True) or {}
+    uids = payload.get('uids', [])
+    source_folder = payload.get('folder', 'INBOX')
     results = {'deleted': 0, 'errors': []}
     
     if conn and conn.connect():
-        for uid in uids:
-            try:
-                conn.move_to_trash(uid)
-                results['deleted'] += 1
-            except Exception as e:
-                results['errors'].append(str(e))
+        if not uids:
+            folder_manager = FolderManager(conn)
+            results = folder_manager.delete_spam_and_fraud(permanent=False)
+        else:
+            for uid in uids:
+                try:
+                    conn.move_to_trash(uid, source_folder)
+                    results['deleted'] += 1
+                except Exception as e:
+                    results['errors'].append(str(e))
         conn.disconnect()
     
     return jsonify(results)
+
+
+@app.route('/emails/action', methods=['POST'])
+@login_required
+def email_action():
+    """Executa ações em lote de interação com e-mails"""
+    conn = get_email_connection()
+    payload = request.get_json(silent=True) or {}
+    action = (payload.get('action') or '').strip().lower()
+    uids = payload.get('uids') or []
+    source_folder = payload.get('source_folder', 'INBOX')
+    target_folder = payload.get('target_folder', '')
+
+    valid_actions = {'delete', 'move', 'archive', 'mark_read', 'mark_unread'}
+    if action not in valid_actions:
+        return jsonify({'success': False, 'error': 'Ação inválida'}), 400
+    if not isinstance(uids, list) or not uids:
+        return jsonify({'success': False, 'error': 'Nenhum e-mail selecionado'}), 400
+    if action == 'move' and not target_folder:
+        return jsonify({'success': False, 'error': 'Pasta de destino não informada'}), 400
+
+    results = {'success': True, 'processed': 0, 'errors': []}
+
+    if not conn or not conn.connect():
+        return jsonify({'success': False, 'error': 'Não foi possível conectar à conta de e-mail'}), 500
+
+    for uid in uids:
+        ok = False
+        try:
+            if action == 'delete':
+                ok = conn.move_to_trash(uid, source_folder)
+            elif action == 'move':
+                ok = conn.move_email(uid, source_folder, target_folder)
+            elif action == 'archive':
+                ok = conn.archive_email(uid, source_folder)
+            elif action == 'mark_read':
+                ok = conn.set_read_status(uid, source_folder, True)
+            elif action == 'mark_unread':
+                ok = conn.set_read_status(uid, source_folder, False)
+        except Exception as e:
+            results['errors'].append(f'{uid}: {str(e)}')
+            continue
+
+        if ok:
+            results['processed'] += 1
+        else:
+            results['errors'].append(f'{uid}: falha ao executar ação')
+
+    conn.disconnect()
+    return jsonify(results)
+
+
+@app.route('/emails/send', methods=['POST'])
+@login_required
+def send_email():
+    """Envia e-mail (novo, resposta ou encaminhamento)"""
+    conn = get_email_connection()
+    payload = request.get_json(silent=True) or {}
+
+    to = (payload.get('to') or '').strip()
+    cc = parse_emails_field(payload.get('cc', ''))
+    bcc = parse_emails_field(payload.get('bcc', ''))
+    subject = (payload.get('subject') or '').strip()
+    body = payload.get('body') or ''
+    is_html = bool(payload.get('html', False))
+    reply_to = (payload.get('reply_to') or '').strip()
+
+    if not to:
+        return jsonify({'success': False, 'error': 'Destinatário obrigatório'}), 400
+    if not subject:
+        return jsonify({'success': False, 'error': 'Assunto obrigatório'}), 400
+    if not body.strip():
+        return jsonify({'success': False, 'error': 'Mensagem obrigatória'}), 400
+
+    if not conn:
+        return jsonify({'success': False, 'error': 'Sessão inválida'}), 401
+
+    ok = conn.send_email(
+        to=to,
+        subject=subject,
+        body=body,
+        html=is_html,
+        cc=cc,
+        bcc=bcc,
+        reply_to=reply_to if reply_to else None
+    )
+
+    if not ok:
+        return jsonify({'success': False, 'error': 'Falha ao enviar e-mail'}), 500
+
+    return jsonify({'success': True, 'message': 'E-mail enviado com sucesso'})
 
 
 @app.route('/folders', methods=['GET', 'POST'])
@@ -614,14 +901,16 @@ def analise_interativa():
 def delete_email():
     """Exclui um email específico"""
     conn = get_email_connection()
-    uid = request.json.get('uid')
+    payload = request.get_json(silent=True) or {}
+    uid = payload.get('uid')
+    folder = payload.get('folder', 'INBOX')
     
     if not uid:
         return jsonify({'success': False, 'error': 'UID não informado'})
     
     if conn and conn.connect():
         try:
-            conn.move_to_trash(uid, 'INBOX')
+            conn.move_to_trash(uid, folder)
             conn.disconnect()
             return jsonify({'success': True})
         except Exception as e:
@@ -636,14 +925,16 @@ def delete_email():
 def delete_multiple():
     """Exclui múltiplos emails"""
     conn = get_email_connection()
-    uids = request.json.get('uids', [])
+    payload = request.get_json(silent=True) or {}
+    uids = payload.get('uids', [])
+    folder = payload.get('folder', 'INBOX')
     
     results = {'deleted': 0, 'errors': 0}
     
     if conn and conn.connect():
         for uid in uids:
             try:
-                conn.move_to_trash(uid, 'INBOX')
+                conn.move_to_trash(uid, folder)
                 results['deleted'] += 1
             except:
                 results['errors'] += 1
@@ -654,4 +945,3 @@ def delete_multiple():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=2000)
-

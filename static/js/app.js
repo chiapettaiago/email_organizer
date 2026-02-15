@@ -220,7 +220,7 @@ dynamicStyles.textContent = `
     }
 
     /* Modal System */
-    .modal-overlay {
+    #modal-overlay {
         position: fixed;
         top: 0;
         left: 0;
@@ -237,12 +237,12 @@ dynamicStyles.textContent = `
         transition: all 0.3s ease;
     }
 
-    .modal-overlay.show {
+    #modal-overlay.show {
         opacity: 1;
         visibility: visible;
     }
 
-    .modal-container {
+    #modal-overlay .modal-container {
         background: #ffffff;
         border-radius: 16px;
         padding: 0;
@@ -255,11 +255,11 @@ dynamicStyles.textContent = `
         border: 1px solid #e2e8f0;
     }
 
-    .modal-overlay.show .modal-container {
+    #modal-overlay.show .modal-container {
         transform: scale(1) translateY(0);
     }
 
-    .modal-header {
+    #modal-overlay .modal-header {
         padding: 1.5rem 1.5rem 0.75rem;
         display: flex;
         flex-direction: column;
@@ -268,7 +268,7 @@ dynamicStyles.textContent = `
         text-align: center;
     }
 
-    .modal-icon {
+    #modal-overlay .modal-icon {
         width: 52px;
         height: 52px;
         border-radius: 50%;
@@ -279,13 +279,13 @@ dynamicStyles.textContent = `
         flex-shrink: 0;
     }
 
-    .modal-icon.info { background: #e0f2fe; }
-    .modal-icon.success { background: #d1fae5; }
-    .modal-icon.warning { background: #fef3c7; }
-    .modal-icon.error { background: #fee2e2; }
-    .modal-icon.confirm { background: #ede9fe; }
+    #modal-overlay .modal-icon.info { background: #e0f2fe; }
+    #modal-overlay .modal-icon.success { background: #d1fae5; }
+    #modal-overlay .modal-icon.warning { background: #fef3c7; }
+    #modal-overlay .modal-icon.error { background: #fee2e2; }
+    #modal-overlay .modal-icon.confirm { background: #ede9fe; }
 
-    .modal-title {
+    #modal-overlay .modal-title {
         font-size: 1.125rem;
         font-weight: 600;
         color: #0f172a;
@@ -293,11 +293,11 @@ dynamicStyles.textContent = `
         letter-spacing: -0.02em;
     }
 
-    .modal-body {
+    #modal-overlay .modal-body {
         padding: 0.5rem 1.5rem 1.5rem;
     }
 
-    .modal-message {
+    #modal-overlay .modal-message {
         color: #475569;
         font-size: 0.9375rem;
         line-height: 1.6;
@@ -305,14 +305,14 @@ dynamicStyles.textContent = `
         text-align: center;
     }
 
-    .modal-footer {
+    #modal-overlay .modal-footer {
         padding: 0 1.5rem 1.5rem;
         display: flex;
         gap: 0.75rem;
         justify-content: center;
     }
 
-    .modal-btn {
+    #modal-overlay .modal-btn {
         padding: 0.625rem 1.25rem;
         border-radius: 8px;
         font-size: 0.875rem;
@@ -323,31 +323,31 @@ dynamicStyles.textContent = `
         min-width: 100px;
     }
 
-    .modal-btn-secondary {
+    #modal-overlay .modal-btn-secondary {
         background: #f1f5f9;
         color: #0f172a;
         border: 1px solid #e2e8f0;
     }
 
-    .modal-btn-secondary:hover {
+    #modal-overlay .modal-btn-secondary:hover {
         background: #e2e8f0;
     }
 
-    .modal-btn-primary {
+    #modal-overlay .modal-btn-primary {
         background: #2563eb;
         color: white;
     }
 
-    .modal-btn-primary:hover {
+    #modal-overlay .modal-btn-primary:hover {
         background: #1d4ed8;
     }
 
-    .modal-btn-danger {
+    #modal-overlay .modal-btn-danger {
         background: #ef4444;
         color: white;
     }
 
-    .modal-btn-danger:hover {
+    #modal-overlay .modal-btn-danger:hover {
         background: #dc2626;
     }
 `;
@@ -468,4 +468,3 @@ function showAlert(message, type = 'info') {
 }
 
 console.log('📧 Email Organizer loaded successfully');
-

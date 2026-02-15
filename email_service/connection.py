@@ -360,9 +360,69 @@ class EmailConnection:
             except:
                 return False
     
-    def send_email(self, to: str, subject: str, body: str, html: bool = False) -> bool:
+    def set_read_status(self, uid: str, folder: str = 'INBOX', is_read: bool = True) -> bool:
+        """Marca e-mail como lido ou não lido"""
+        if not self.imap_conn:
+            return False
+
+        try:
+            self.imap_conn.select(folder)
+            flag_action = '+FLAGS' if is_read else '-FLAGS'
+            status, _ = self.imap_conn.uid('store', uid, flag_action, '\\Seen')
+            return status == 'OK'
+        except Exception as e:
+            print(f"Erro ao atualizar status de leitura: {e}")
+            return False
+
+    def archive_email(self, uid: str, from_folder: str = 'INBOX') -> bool:
+        """Move e-mail para a pasta de arquivo"""
+        if not self.imap_conn:
+            return False
+
+        folders = self.list_folders()
+        archive_candidates = [
+            'Archive',
+            'Arquivo',
+            'All Mail',
+            'INBOX.Archive',
+            'Arquivados'
+        ]
+
+        archive_folder = None
+        for candidate in archive_candidates:
+            if candidate in folders:
+                archive_folder = candidate
+                break
+
+        if not archive_folder:
+            # Tenta criar uma pasta de arquivo padrão se não existir
+            if self.create_folder('Archive'):
+                archive_folder = 'Archive'
+            else:
+                return False
+
+        return self.move_email(uid, from_folder, archive_folder)
+
+    def send_email(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        html: bool = False,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        reply_to: Optional[str] = None
+    ) -> bool:
         """Envia um e-mail via SMTP"""
         try:
+            to_list = [item.strip() for item in (to or '').split(',') if item.strip()]
+            cc_list = [item.strip() for item in (cc or []) if item.strip()]
+            bcc_list = [item.strip() for item in (bcc or []) if item.strip()]
+            recipients = to_list + cc_list + bcc_list
+
+            if not recipients:
+                return False
+
             context = ssl.create_default_context()
             
             with smtplib.SMTP_SSL(self.smtp_server, self.smtp_port, context=context) as server:
@@ -370,15 +430,19 @@ class EmailConnection:
                 
                 msg = MIMEMultipart('alternative')
                 msg['From'] = self.email_address
-                msg['To'] = to
+                msg['To'] = ', '.join(to_list)
                 msg['Subject'] = subject
+                if cc_list:
+                    msg['Cc'] = ', '.join(cc_list)
+                if reply_to:
+                    msg['Reply-To'] = reply_to
                 
                 if html:
                     msg.attach(MIMEText(body, 'html'))
                 else:
                     msg.attach(MIMEText(body, 'plain'))
                 
-                server.send_message(msg)
+                server.send_message(msg, to_addrs=recipients)
                 return True
         except Exception as e:
             print(f"Erro ao enviar e-mail: {e}")

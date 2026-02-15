@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}{{ email.subject }} - Email Organizer{% endblock %}
+{% block title %}{{ message.subject }} - Email Organizer{% endblock %}
 
 {% block content %}
 <div class="view-email-page">
@@ -8,42 +8,58 @@
         <a href="{{ url_for('emails', folder=folder) }}" class="back-link">
             <span class="icon">←</span> Voltar para {{ folder }}
         </a>
+        <div class="header-actions">
+            <button class="btn btn-primary" type="button" onclick="openComposeModal()">
+                ✉️ Novo E-mail
+            </button>
+            <button class="btn btn-outline" type="button" onclick="replyEmail()">
+                ↩ Responder
+            </button>
+            <button class="btn btn-outline" type="button" onclick="forwardEmail()">
+                ⤴ Encaminhar
+            </button>
+        </div>
     </header>
 
     <article class="email-view">
         <header class="email-header">
-            <h1 class="email-subject">{{ email.subject }}</h1>
+            <h1 class="email-subject">{{ message.subject }}</h1>
             <div class="email-meta">
                 <div class="email-from-to">
-                    <p><strong>De:</strong> {{ email.from }}</p>
-                    {% if email.to %}
-                    <p><strong>Para:</strong> {{ email.to }}</p>
+                    <p><strong>De:</strong> {{ message.from }}</p>
+                    {% if message.to %}
+                    <p><strong>Para:</strong> {{ message.to }}</p>
                     {% endif %}
                 </div>
                 <div class="email-date">
-                    <span>{{ email.date }}</span>
+                    <span>{{ message.date }}</span>
                 </div>
             </div>
         </header>
 
-        <div class="email-actions">
+        <div class="email-actions email-actions-wrap">
             <button class="btn btn-outline btn-sm" onclick="analyzeEmail()">
                 <span class="icon">🔍</span> Analisar
             </button>
+            <button class="btn btn-outline btn-sm" onclick="markAsUnread()">
+                <span class="icon">📩</span> Marcar não lido
+            </button>
             <button class="btn btn-outline btn-sm" onclick="moveEmail()">
                 <span class="icon">📁</span> Mover
+            </button>
+            <button class="btn btn-outline btn-sm" onclick="archiveEmail()">
+                <span class="icon">🗄️</span> Arquivar
             </button>
             <button class="btn btn-danger btn-sm" onclick="deleteEmail()">
                 <span class="icon">🗑️</span> Excluir
             </button>
         </div>
 
-        <div class="email-body">
-            {{ email.body | safe }}
+        <div class="email-body {% if not message.body_is_html %}email-body-plain{% endif %}">
+            {{ message.body_formatted }}
         </div>
     </article>
 
-    <!-- Modal de Análise -->
     <div id="analysis-modal" class="modal hidden">
         <div class="modal-overlay" onclick="closeAnalysisModal()"></div>
         <div class="modal-content">
@@ -56,11 +72,165 @@
             </div>
         </div>
     </div>
+
+    <div id="move-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeMoveModal()"></div>
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3>Mover e-mail</h3>
+                <button class="modal-close" onclick="closeMoveModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="target-folder">Pasta de destino</label>
+                    <select id="target-folder" class="form-select">
+                        <option value="">Selecione</option>
+                        {% for folder_name in folders %}
+                        {% if folder_name != folder %}
+                        <option value="{{ folder_name }}">{{ folder_name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" type="button" onclick="closeMoveModal()">Cancelar</button>
+                <button class="btn btn-primary" type="button" onclick="confirmMove()">Mover</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="compose-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeComposeModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="compose-title">Novo E-mail</h3>
+                <button class="modal-close" onclick="closeComposeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <form id="compose-form" class="compose-form" onsubmit="sendEmail(event)">
+                    <div class="form-group">
+                        <label for="compose-to">Para</label>
+                        <input id="compose-to" class="form-input compose-input" type="text" required>
+                    </div>
+                    <div class="compose-grid">
+                        <div class="form-group">
+                            <label for="compose-cc">CC</label>
+                            <input id="compose-cc" class="form-input compose-input" type="text">
+                        </div>
+                        <div class="form-group">
+                            <label for="compose-bcc">CCO</label>
+                            <input id="compose-bcc" class="form-input compose-input" type="text">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="compose-subject">Assunto</label>
+                        <input id="compose-subject" class="form-input compose-input" type="text" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="compose-body-editor">Mensagem</label>
+                        <div class="compose-toolbar" role="toolbar" aria-label="Formatação de texto">
+                            <button type="button" class="compose-tool-btn" onclick="formatCompose('bold')" title="Negrito"><strong>B</strong></button>
+                            <button type="button" class="compose-tool-btn" onclick="formatCompose('italic')" title="Itálico"><em>I</em></button>
+                            <button type="button" class="compose-tool-btn" onclick="formatCompose('underline')" title="Sublinhado"><u>U</u></button>
+                            <button type="button" class="compose-tool-btn" onclick="formatCompose('insertUnorderedList')" title="Lista">• Lista</button>
+                            <button type="button" class="compose-tool-btn" onclick="formatCompose('insertOrderedList')" title="Lista numerada">1. Lista</button>
+                            <button type="button" class="compose-tool-btn" onclick="insertComposeLink()" title="Inserir link">🔗 Link</button>
+                            <button type="button" class="compose-tool-btn" onclick="formatCompose('removeFormat')" title="Limpar formatação">Tx</button>
+                        </div>
+                        <div id="compose-body-editor" class="compose-editor" contenteditable="true" aria-label="Corpo do e-mail"></div>
+                        <input type="hidden" id="compose-body">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" type="button" onclick="closeComposeModal()">Cancelar</button>
+                <button class="btn btn-primary" type="submit" form="compose-form">Enviar e-mail</button>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+    const emailUid = {{ message.uid | tojson }};
+    const sourceFolder = {{ folder | tojson }};
+    const emailFrom = {{ message.from | tojson }};
+    const emailSubject = {{ message.subject | tojson }};
+    const emailDate = {{ message.date | tojson }};
+    const emailBody = {{ message.body | tojson }};
+
+    function extractEmailAddress(rawAddress) {
+        const match = (rawAddress || '').match(/<([^>]+)>/);
+        if (match && match[1]) return match[1].trim();
+        return (rawAddress || '').trim();
+    }
+
+    function subjectWithPrefix(prefix, subject) {
+        const normalizedSubject = (subject || '').trim();
+        const expectedPrefix = `${prefix}:`;
+        if (normalizedSubject.toLowerCase().startsWith(expectedPrefix.toLowerCase())) {
+            return normalizedSubject;
+        }
+        return `${expectedPrefix} ${normalizedSubject}`;
+    }
+
+    function escapeHtml(text) {
+        return (text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/\"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function plainTextToHtml(text) {
+        return escapeHtml(text).replace(/\n/g, '<br>');
+    }
+
+    function syncComposeBody() {
+        const editor = document.getElementById('compose-body-editor');
+        const hiddenBody = document.getElementById('compose-body');
+        const html = (editor.innerHTML || '').trim();
+        hiddenBody.value = html;
+    }
+
+    function formatCompose(command) {
+        const editor = document.getElementById('compose-body-editor');
+        editor.focus();
+        document.execCommand(command, false, null);
+        syncComposeBody();
+    }
+
+    function insertComposeLink() {
+        const url = prompt('Digite a URL do link:');
+        if (!url) return;
+        const editor = document.getElementById('compose-body-editor');
+        editor.focus();
+        document.execCommand('createLink', false, url.trim());
+        syncComposeBody();
+    }
+
+    async function callEmailAction(action, payload = {}) {
+        const response = await fetch('/emails/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action,
+                uids: [emailUid],
+                source_folder: sourceFolder,
+                ...payload
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Falha na ação de e-mail');
+        }
+        return data;
+    }
+
     async function analyzeEmail() {
         document.getElementById('analysis-modal').classList.remove('hidden');
         document.getElementById('analysis-body').innerHTML = '<div class="loading">Analisando...</div>';
@@ -68,9 +238,7 @@
         try {
             const response = await fetch('/scan', { method: 'POST' });
             const data = await response.json();
-
-            // Encontra este e-mail nos resultados
-            const thisEmail = data.items.find(item => item.uid === '{{ email.uid }}');
+            const thisEmail = data.items.find(item => item.uid === emailUid);
 
             let html = '';
             if (thisEmail) {
@@ -79,34 +247,32 @@
                     (thisEmail.is_spam ? '🚫 Spam Detectado' : '✅ E-mail Seguro');
 
                 html = `
-                <div class="analysis-result">
-                    <div class="analysis-status status-${statusClass}">
-                        <span class="status-icon">${statusText}</span>
-                        <span class="status-score">Score: ${thisEmail.score}/100</span>
-                    </div>
-                    ${thisEmail.reasons.length > 0 ? `
+                    <div class="analysis-result">
+                        <div class="analysis-status status-${statusClass}">
+                            <span class="status-icon">${statusText}</span>
+                            <span class="status-score">Score: ${thisEmail.score}/100</span>
+                        </div>
+                        ${thisEmail.reasons.length > 0 ? `
                         <div class="analysis-reasons">
                             <h4>Motivos:</h4>
                             <ul>
                                 ${thisEmail.reasons.map(r => `<li>${r}</li>`).join('')}
                             </ul>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
+                        </div>` : ''}
+                    </div>
+                `;
             } else {
                 html = `
-                <div class="analysis-result">
-                    <div class="analysis-status status-success">
-                        <span class="status-icon">✅ E-mail Seguro</span>
-                        <span class="status-score">Nenhuma ameaça detectada</span>
+                    <div class="analysis-result">
+                        <div class="analysis-status status-success">
+                            <span class="status-icon">✅ E-mail Seguro</span>
+                            <span class="status-score">Nenhuma ameaça detectada</span>
+                        </div>
                     </div>
-                </div>
-            `;
+                `;
             }
 
             document.getElementById('analysis-body').innerHTML = html;
-
         } catch (error) {
             document.getElementById('analysis-body').innerHTML =
                 '<div class="error">Erro ao analisar e-mail: ' + error.message + '</div>';
@@ -117,9 +283,49 @@
         document.getElementById('analysis-modal').classList.add('hidden');
     }
 
-    async function moveEmail() {
-        await showAlert('Funcionalidade de mover disponível na lista de e-mails', 'info');
-        window.location.href = '{{ url_for("emails", folder=folder) }}';
+    function moveEmail() {
+        document.getElementById('target-folder').value = '';
+        document.getElementById('move-modal').classList.remove('hidden');
+    }
+
+    function closeMoveModal() {
+        document.getElementById('move-modal').classList.add('hidden');
+    }
+
+    async function confirmMove() {
+        const targetFolder = document.getElementById('target-folder').value;
+        if (!targetFolder) {
+            await showAlert('Selecione uma pasta de destino.', 'warning');
+            return;
+        }
+
+        try {
+            await callEmailAction('move', { target_folder: targetFolder });
+            showToast('E-mail movido com sucesso.', 'success');
+            window.location.href = `/emails/${encodeURIComponent(targetFolder)}`;
+        } catch (error) {
+            await showAlert('Erro ao mover e-mail: ' + error.message, 'error');
+        }
+    }
+
+    async function markAsUnread() {
+        try {
+            await callEmailAction('mark_unread');
+            showToast('E-mail marcado como não lido.', 'success');
+            window.location.href = `{{ url_for('emails', folder=folder) }}`;
+        } catch (error) {
+            await showAlert('Erro ao marcar e-mail: ' + error.message, 'error');
+        }
+    }
+
+    async function archiveEmail() {
+        try {
+            await callEmailAction('archive');
+            showToast('E-mail arquivado com sucesso.', 'success');
+            window.location.href = `{{ url_for('emails', folder=folder) }}`;
+        } catch (error) {
+            await showAlert('Erro ao arquivar e-mail: ' + error.message, 'error');
+        }
     }
 
     async function deleteEmail() {
@@ -130,21 +336,86 @@
         if (!confirmed) return;
 
         try {
-            const response = await fetch('/delete-spam', {
+            await callEmailAction('delete');
+            showToast('E-mail excluído.', 'success');
+            window.location.href = `{{ url_for('emails', folder=folder) }}`;
+        } catch (error) {
+            await showAlert('Erro ao excluir e-mail: ' + error.message, 'error');
+        }
+    }
+
+    function openComposeModal(payload = {}) {
+        document.getElementById('compose-title').textContent = payload.title || 'Novo E-mail';
+        document.getElementById('compose-to').value = payload.to || '';
+        document.getElementById('compose-cc').value = payload.cc || '';
+        document.getElementById('compose-bcc').value = payload.bcc || '';
+        document.getElementById('compose-subject').value = payload.subject || '';
+        const editor = document.getElementById('compose-body-editor');
+        editor.innerHTML = plainTextToHtml(payload.body || '');
+        syncComposeBody();
+        document.getElementById('compose-modal').classList.remove('hidden');
+        editor.focus();
+    }
+
+    function closeComposeModal() {
+        document.getElementById('compose-modal').classList.add('hidden');
+    }
+
+    function replyEmail() {
+        const sender = extractEmailAddress(emailFrom);
+        const quotedBody = `\n\n--- Mensagem original ---\nDe: ${emailFrom}\nData: ${emailDate}\nAssunto: ${emailSubject}\n\n${emailBody}`;
+        openComposeModal({
+            title: 'Responder e-mail',
+            to: sender,
+            subject: subjectWithPrefix('Re', emailSubject),
+            body: quotedBody
+        });
+    }
+
+    function forwardEmail() {
+        const forwardedBody = `\n\n--- Encaminhado ---\nDe: ${emailFrom}\nData: ${emailDate}\nAssunto: ${emailSubject}\n\n${emailBody}`;
+        openComposeModal({
+            title: 'Encaminhar e-mail',
+            to: '',
+            subject: subjectWithPrefix('Fwd', emailSubject),
+            body: forwardedBody
+        });
+    }
+
+    async function sendEmail(event) {
+        event.preventDefault();
+        syncComposeBody();
+        const composeBody = document.getElementById('compose-body').value;
+        const composeBodyText = document.getElementById('compose-body-editor').textContent.trim();
+
+        const payload = {
+            to: document.getElementById('compose-to').value.trim(),
+            cc: document.getElementById('compose-cc').value.trim(),
+            bcc: document.getElementById('compose-bcc').value.trim(),
+            subject: document.getElementById('compose-subject').value.trim(),
+            body: composeBody,
+            html: true
+        };
+
+        if (!composeBodyText) {
+            await showAlert('A mensagem não pode estar vazia.', 'warning');
+            return;
+        }
+
+        try {
+            const response = await fetch('/emails/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uids: ['{{ email.uid }}'] })
+                body: JSON.stringify(payload)
             });
             const data = await response.json();
-
-            if (data.deleted > 0) {
-                showToast('E-mail excluído!', 'success');
-                window.location.href = '{{ url_for("emails", folder=folder) }}';
-            } else {
-                await showAlert('Erro ao excluir e-mail', 'error');
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Falha ao enviar e-mail');
             }
+            showToast('E-mail enviado com sucesso.', 'success');
+            closeComposeModal();
         } catch (error) {
-            await showAlert('Erro: ' + error.message, 'error');
+            await showAlert('Erro ao enviar e-mail: ' + error.message, 'error');
         }
     }
 </script>
