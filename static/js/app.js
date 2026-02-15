@@ -15,43 +15,127 @@ progressBar.innerHTML = `
 progressBar.style.display = 'none';
 document.body.prepend(progressBar);
 
+// ===== Loader Global (estilo Windows 11) =====
+const loadingOverlay = document.createElement('div');
+loadingOverlay.id = 'global-loading-overlay';
+loadingOverlay.setAttribute('aria-live', 'polite');
+loadingOverlay.setAttribute('aria-busy', 'true');
+loadingOverlay.innerHTML = `
+    <div class="win11-loader" role="status" aria-label="Carregando">
+        ${Array.from({ length: 8 }, (_, index) => `<span class="win11-loader-dot" style="--i:${index}"></span>`).join('')}
+    </div>
+    <div class="win11-loader-text" id="global-loading-text">Processando...</div>
+`;
+document.body.appendChild(loadingOverlay);
+
+let activeLoadingOperations = 0;
+let loadingOverlayTimer = null;
+
+function showLoadingOverlay(message = 'Processando...') {
+    const text = document.getElementById('global-loading-text');
+    if (text) text.textContent = message;
+
+    if (loadingOverlayTimer) {
+        clearTimeout(loadingOverlayTimer);
+    }
+
+    // Evita flicker em ações extremamente rápidas.
+    loadingOverlayTimer = setTimeout(() => {
+        if (activeLoadingOperations > 0) {
+            loadingOverlay.classList.add('show');
+        }
+    }, 140);
+}
+
+function hideLoadingOverlay() {
+    if (loadingOverlayTimer) {
+        clearTimeout(loadingOverlayTimer);
+        loadingOverlayTimer = null;
+    }
+    loadingOverlay.classList.remove('show');
+}
+
+function beginGlobalLoading(message = 'Processando...') {
+    activeLoadingOperations += 1;
+    if (activeLoadingOperations === 1) {
+        showLoadingOverlay(message);
+    }
+}
+
+function endGlobalLoading() {
+    if (activeLoadingOperations <= 0) return;
+    activeLoadingOperations -= 1;
+    if (activeLoadingOperations === 0) {
+        hideLoadingOverlay();
+    }
+}
+
+// Disponibiliza para chamadas manuais em scripts de página, quando necessário.
+window.startGlobalLoading = beginGlobalLoading;
+window.stopGlobalLoading = endGlobalLoading;
+
+const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
+if (nativeFetch) {
+    window.fetch = async function wrappedFetch(input, init = {}) {
+        const headersSource = (init && init.headers) || (input instanceof Request ? input.headers : undefined);
+        const headers = new Headers(headersSource || {});
+        const skipLoading = Boolean(init && init.skipLoading) || headers.get('X-Skip-Loader') === 'true';
+
+        let finalInit = init;
+        if (init && Object.prototype.hasOwnProperty.call(init, 'skipLoading')) {
+            finalInit = { ...init };
+            delete finalInit.skipLoading;
+        }
+
+        if (!skipLoading) {
+            beginGlobalLoading();
+        }
+        try {
+            return await nativeFetch(input, finalInit);
+        } finally {
+            if (!skipLoading) {
+                endGlobalLoading();
+            }
+        }
+    };
+}
+
+document.addEventListener('submit', (event) => {
+    if (event.defaultPrevented) return;
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+
+    const method = (form.getAttribute('method') || 'GET').toUpperCase();
+    if (method === 'GET') return;
+    if (!form.checkValidity()) return;
+
+    beginGlobalLoading('Executando ação...');
+});
+
 // Função para mostrar barra de progresso
 function showProgress(message = 'Processando...', progress = null) {
-    const bar = document.getElementById('global-progress');
-    const fill = bar.querySelector('.progress-fill');
-    const text = bar.querySelector('.progress-text');
-
-    text.textContent = message;
-    bar.style.display = 'block';
-
-    if (progress !== null) {
-        // Progresso determinado (0-100)
-        fill.style.width = `${progress}%`;
-        fill.classList.remove('indeterminate');
-    } else {
-        // Progresso indeterminado (animação)
-        fill.style.width = '100%';
-        fill.classList.add('indeterminate');
+    let finalMessage = message;
+    if (progress !== null && progress !== undefined) {
+        finalMessage = `${message} (${Math.max(0, Math.min(100, Number(progress) || 0)).toFixed(0)}%)`;
     }
+    beginGlobalLoading(finalMessage);
 }
 
 // Função para esconder barra de progresso
 function hideProgress() {
-    const bar = document.getElementById('global-progress');
-    bar.style.display = 'none';
+    endGlobalLoading();
 }
 
 // Função para atualizar progresso
 function updateProgress(message, progress) {
-    const bar = document.getElementById('global-progress');
-    const fill = bar.querySelector('.progress-fill');
-    const text = bar.querySelector('.progress-text');
+    const text = document.getElementById('global-loading-text');
+    if (!text) return;
 
-    if (message) text.textContent = message;
+    let finalMessage = message || text.textContent || 'Processando...';
     if (progress !== null && progress !== undefined) {
-        fill.style.width = `${progress}%`;
-        fill.classList.remove('indeterminate');
+        finalMessage = `${finalMessage} (${Math.max(0, Math.min(100, Number(progress) || 0)).toFixed(0)}%)`;
     }
+    text.textContent = finalMessage;
 }
 
 // Fechar flash messages automaticamente após 5 segundos
@@ -127,6 +211,68 @@ function showToast(message, type = 'info') {
 // Adiciona estilos dinamicamente
 const dynamicStyles = document.createElement('style');
 dynamicStyles.textContent = `
+    /* Global Loading Overlay */
+    #global-loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 11000;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        background: rgba(248, 250, 252, 0.55);
+        backdrop-filter: blur(2px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease;
+    }
+
+    #global-loading-overlay.show {
+        opacity: 1;
+        pointer-events: all;
+    }
+
+    .win11-loader {
+        width: 42px;
+        height: 42px;
+        position: relative;
+    }
+
+    .win11-loader-dot {
+        --radius: 16px;
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 7px;
+        height: 7px;
+        margin: -3.5px;
+        border-radius: 50%;
+        background: #0a66d8;
+        opacity: 0.12;
+        transform: rotate(calc(var(--i) * 45deg)) translateY(calc(var(--radius) * -1)) scale(0.72);
+        animation: win11Spinner 1.05s linear infinite;
+        animation-delay: calc(var(--i) * -0.13125s);
+    }
+
+    @keyframes win11Spinner {
+        0%, 39%, 100% {
+            opacity: 0.12;
+            transform: rotate(calc(var(--i) * 45deg)) translateY(calc(var(--radius) * -1)) scale(0.72);
+        }
+        40% {
+            opacity: 1;
+            transform: rotate(calc(var(--i) * 45deg)) translateY(calc(var(--radius) * -1)) scale(1);
+        }
+    }
+
+    .win11-loader-text {
+        font-size: 0.95rem;
+        color: #0f172a;
+        font-weight: 500;
+        letter-spacing: 0.01em;
+    }
+
     /* Progress Bar Global */
     #global-progress {
         position: fixed;
