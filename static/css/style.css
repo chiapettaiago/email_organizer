@@ -548,7 +548,7 @@ a:hover {
 
     .main-content.has-sidebar {
         margin-left: 0 !important;
-        padding-top: 78px;
+        padding-top: 80px;
         padding-bottom: 88px;
     }
 }
@@ -2229,6 +2229,7 @@ a:hover {
 @media (max-width: 768px) {
     .emails-page {
         margin: -0.25rem;
+        margin-top: 0;
     }
 
     .email-page-header {
@@ -2240,7 +2241,7 @@ a:hover {
         gap: 0.5rem;
         padding: 0.35rem 0.75rem 0.65rem;
         position: sticky;
-        top: 62px;
+        top: 0;
         background: #f7f9fc;
         z-index: 25;
     }
