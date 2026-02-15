@@ -31,7 +31,10 @@ LOCAWEB_SMTP_SERVER = 'email-ssl.com.br'
 LOCAWEB_SMTP_PORT = 465
 
 # Arquivo de configurações persistentes
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'user_config.json')
+CONFIG_FILE = os.getenv(
+    'USER_CONFIG_FILE',
+    os.path.join(os.path.dirname(__file__), 'user_config.json')
+)
 _CONFIG_LOCK = RLock()
 _CONFIG_CACHE = None
 _CONFIG_CACHE_MTIME = None
@@ -99,11 +102,22 @@ def save_config(config):
     temp_file = f'{CONFIG_FILE}.tmp'
 
     with _CONFIG_LOCK:
-        with open(temp_file, 'w', encoding='utf-8') as f:
-            json.dump(normalized, f, indent=2)
-        os.replace(temp_file, CONFIG_FILE)
+        try:
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(normalized, f, indent=2)
+            os.replace(temp_file, CONFIG_FILE)
+        except PermissionError:
+            # Fallback: alguns ambientes permitem atualizar o arquivo existente,
+            # mas não criar um novo .tmp no diretório.
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(normalized, f, indent=2)
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except OSError:
+                pass
         _CONFIG_CACHE = normalized
-        _CONFIG_CACHE_MTIME = os.path.getmtime(CONFIG_FILE)
+        _CONFIG_CACHE_MTIME = os.path.getmtime(CONFIG_FILE) if os.path.exists(CONFIG_FILE) else None
 
 
 def get_admin_emails():
