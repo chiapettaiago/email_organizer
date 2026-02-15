@@ -350,9 +350,9 @@ def get_email_connection():
 
 @app.route('/')
 def index():
-    """Página inicial - redireciona para dashboard ou login"""
+    """Página inicial - redireciona para e-mails ou login"""
     if 'email' in session:
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('emails'))
     return redirect(url_for('login'))
 
 
@@ -396,9 +396,9 @@ def login():
             config['accounts'] = accounts
             save_config(config)
 
-            print(f"[LOGIN] Sucesso! Redirecionando para dashboard")
+            print(f"[LOGIN] Sucesso! Redirecionando para e-mails")
             flash(f'Bem-vindo, {email_address}!', 'success')
-            return redirect(url_for('dashboard'))
+            return redirect(url_for('emails'))
         
         print("[LOGIN] Falha: e-mail ou senha inválidos")
         flash('Falha na autenticação do e-mail. Verifique as credenciais.', 'error')
