@@ -202,6 +202,86 @@
 {% block extra_js %}
 <script>
     const currentFolder = {{ current_folder | tojson }};
+    let allEmails = [];
+    let searchQuery = '';
+
+    // Salvar emails originais ao carregar a página
+    document.addEventListener('DOMContentLoaded', function() {
+        allEmails = Array.from(document.querySelectorAll('.email-item')).map(item => {
+            return {
+                element: item,
+                uid: item.dataset.uid,
+                from: item.querySelector('.email-from')?.textContent.toLowerCase() || '',
+                subject: item.querySelector('.email-subject')?.textContent.toLowerCase() || '',
+                date: item.querySelector('.email-date')?.textContent.toLowerCase() || ''
+            };
+        });
+
+        // Conectar pesquisa global à filtragem de emails
+        const globalSearchInput = document.getElementById('global-search-input');
+        if (globalSearchInput) {
+            globalSearchInput.addEventListener('input', function(e) {
+                const query = e.target.value.toLowerCase().trim();
+                if (query) {
+                    filterEmails(query);
+                } else {
+                    clearSearch();
+                }
+            });
+
+            globalSearchInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    const query = e.target.value.toLowerCase().trim();
+                    if (query) {
+                        filterEmails(query);
+                    }
+                }
+            });
+        }
+    });
+
+    function filterEmails(query) {
+        let visibleCount = 0;
+        allEmails.forEach(email => {
+            const matches = email.from.includes(query) || 
+                          email.subject.includes(query) || 
+                          email.date.includes(query);
+            
+            if (matches) {
+                email.element.style.display = '';
+                visibleCount++;
+            } else {
+                email.element.style.display = 'none';
+            }
+        });
+
+        // Atualizar contador
+        const emailsList = document.querySelector('.emails-list');
+        if (!emailsList) return;
+        
+        const existingMessage = emailsList.querySelector('.search-info');
+        if (existingMessage) existingMessage.remove();
+
+        if (query) {
+            const info = document.createElement('div');
+            info.className = 'search-info';
+            info.textContent = `${visibleCount} e-mail(s) encontrado(s) para "${query}"`;
+            emailsList.insertBefore(info, emailsList.firstChild);
+        }
+    }
+
+    function clearSearch() {
+        const globalSearchInput = document.getElementById('global-search-input');
+        if (globalSearchInput) {
+            globalSearchInput.value = '';
+        }
+        searchQuery = '';
+        allEmails.forEach(email => {
+            email.element.style.display = '';
+        });
+        const existingMessage = document.querySelector('.search-info');
+        if (existingMessage) existingMessage.remove();
+    }
 
     function changeFolder(folder) {
         window.location.href = '/emails/' + encodeURIComponent(folder);

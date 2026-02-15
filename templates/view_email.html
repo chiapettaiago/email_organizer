@@ -56,7 +56,24 @@
         </div>
 
         <div class="email-body {% if not message.body_is_html %}email-body-plain{% endif %}">
-            {{ message.body_formatted }}
+            <div id="email-thread-container" class="email-thread-container">
+                <div class="email-message-card">
+                    <div class="message-header">
+                        <div class="message-avatar">{{ message.from[0]|upper if message.from else '?' }}</div>
+                        <div class="message-info">
+                            <div class="message-sender">{{ message.from }}</div>
+                            <div class="message-date">{{ message.date }}</div>
+                        </div>
+                    </div>
+                    <div class="message-body">
+                        {{ message.body_formatted | safe }}
+                    </div>
+                </div>
+                <div id="reply-thread" class="reply-thread"></div>
+                <div id="thread-indicator" class="thread-indicator" style="display: none;">
+                    <span class="thread-count"></span>
+                </div>
+            </div>
         </div>
     </article>
 
@@ -160,6 +177,217 @@
     const emailSubject = {{ message.subject | tojson }};
     const emailDate = {{ message.date | tojson }};
     const emailBody = {{ message.body | tojson }};
+
+    // Detectar e processar thread de resposta ao carregar
+    document.addEventListener('DOMContentLoaded', function() {
+        detectAndDisplayReplyThread();
+    });
+
+    function detectAndDisplayReplyThread() {
+        const bodyText = emailBody;
+        
+        // Padrões para detectar respostas em threads
+        const replyPatterns = [
+            /(?:^|\n)[-]{3,}\s*(?:Mensagem|E-?mail)\s+(?:original|anterior|encaminhada?)/im,
+            /(?:^|\n)Em\s+[^\n]{10,150}?\s+escreveu:\s*$/im,
+            /(?:^|\n)On\s+[^\n]{10,150}?\s+wrote:\s*$/im,
+            /(?:^|\n)De:\s+[^\n]+\nPara:/im,
+            /(?:^|\n)From:\s+[^\n]+\nTo:/im
+        ];
+
+        let hasReply = false;
+        for (let pattern of replyPatterns) {
+            if (pattern.test(bodyText)) {
+                hasReply = true;
+                break;
+            }
+        }
+
+        if (hasReply) {
+            parseAndDisplayThread(bodyText);
+        }
+    }
+
+    function parseAndDisplayThread(bodyText) {
+        const replyThread = document.getElementById('reply-thread');
+        if (!replyThread) return;
+
+        const messages = extractThreadMessages(bodyText);
+        
+        if (messages.length > 0) {
+            // Mostrar indicador de thread
+            const indicator = document.getElementById('thread-indicator');
+            if (indicator) {
+                const countSpan = indicator.querySelector('.thread-count');
+                if (countSpan) {
+                    countSpan.textContent = `💬 ${messages.length} ${messages.length === 1 ? 'resposta' : 'respostas'} na conversa`;
+                }
+                indicator.style.display = 'flex';
+            }
+            
+            messages.forEach((msg, index) => {
+                const replyMessage = createReplyMessage(msg, index);
+                replyThread.appendChild(replyMessage);
+            });
+        }
+    }
+
+    function extractThreadMessages(bodyText) {
+        const messages = [];
+        
+        // Método 1: Separar por delimitadores de mensagem original
+        const delimiterPattern = /[-]{3,}\s*(?:Mensagem|E-?mail)\s+(?:original|anterior|encaminhada?)[^\n]*[-]{3,}/gi;
+        let parts = bodyText.split(delimiterPattern);
+        
+        // Método 2: Separar por cabeçalhos "Em ... escreveu:" ou "On ... wrote:"
+        const headerPattern = /((?:^|\n)(?:Em|On)\s+[^\n]{10,150}?\s+(?:escreveu|wrote):\s*\n)/gi;
+        
+        if (parts.length === 1) {
+            // Tentar separar por headers
+            const segments = [];
+            let lastIndex = 0;
+            let match;
+            
+            while ((match = headerPattern.exec(bodyText)) !== null) {
+                const headerPos = match.index;
+                if (headerPos > lastIndex) {
+                    const content = bodyText.substring(lastIndex, headerPos).trim();
+                    if (content) segments.push({ header: '', content: content });
+                }
+                lastIndex = headerPos + match[0].length;
+                
+                // Buscar próximo header ou fim do texto
+                const nextMatch = headerPattern.exec(bodyText);
+                if (nextMatch) {
+                    headerPattern.lastIndex = lastIndex; // Resetar
+                }
+                
+                const nextPos = nextMatch ? nextMatch.index : bodyText.length;
+                const msgContent = bodyText.substring(lastIndex, nextPos).trim();
+                
+                if (msgContent) {
+                    segments.push({
+                        header: match[0].trim(),
+                        content: msgContent
+                    });
+                }
+                
+                if (!nextMatch) break;
+            }
+            
+            parts = segments.map(s => s.content);
+        }
+        
+        // Método 3: Separar por blocos "De: ... Para: ..." 
+        if (parts.length === 1) {
+            const emailHeaderPattern = /(?:^|\n)((?:De|From):\s+[^\n]+\s*\n(?:Para|To|Enviado|Sent|Assunto|Subject):[^\n]+[^\n]*)/gi;
+            const headerMatches = [];
+            let match;
+            
+            while ((match = emailHeaderPattern.exec(bodyText)) !== null) {
+                headerMatches.push({
+                    index: match.index,
+                    header: match[0],
+                    length: match[0].length
+                });
+            }
+            
+            if (headerMatches.length > 0) {
+                parts = [];
+                for (let i = 0; i < headerMatches.length; i++) {
+                    const start = headerMatches[i].index + headerMatches[i].length;
+                    const end = i < headerMatches.length - 1 ? headerMatches[i + 1].index : bodyText.length;
+                    const content = bodyText.substring(start, end).trim();
+                    if (content) parts.push(content);
+                }
+            }
+        }
+        
+        // Processar partes encontradas
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i].trim();
+            if (!part) continue;
+            
+            // Extrair remetente se possível
+            let sender = 'Desconhecido';
+            let content = part;
+            
+            const fromMatch = part.match(/^(?:De|From):\s*([^\n]+)/i);
+            if (fromMatch) {
+                sender = fromMatch[1].trim();
+                // Remover header completo
+                content = part.replace(/^(?:De|From|Para|To|Enviado|Sent|Assunto|Subject):[^\n]*\n?/gim, '').trim();
+            }
+            
+            // Limitar tamanho
+            if (content.length > 500) {
+                content = content.substring(0, 500) + '...';
+            }
+            
+            if (content.length > 20) { // Apenas se tiver conteúdo relevante
+                messages.push({
+                    sender: sender,
+                    content: content,
+                    timestamp: null
+                });
+            }
+        }
+        
+        return messages;
+    }
+
+    function createReplyMessage(messageData, index) {
+        const isSent = index % 2 === 0; // Alterna entre enviado/recebido
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'reply-message' + (isSent ? ' sent' : '');
+        
+        // Avatar
+        const avatar = document.createElement('div');
+        avatar.className = 'reply-avatar';
+        
+        if (isSent) {
+            avatar.textContent = emailFrom[0] ? emailFrom[0].toUpperCase() : 'E';
+        } else {
+            // Tentar extrair inicial do remetente da mensagem
+            const sender = messageData.sender || 'Remetente';
+            avatar.textContent = sender[0] ? sender[0].toUpperCase() : 'R';
+        }
+        
+        // Conteúdo
+        const content = document.createElement('div');
+        content.className = 'reply-content';
+        
+        const bubble = document.createElement('div');
+        bubble.className = 'reply-bubble';
+        
+        // Processar conteúdo para melhor visualização
+        let displayContent = messageData.content;
+        
+        // Remover excesso de quebras de linha
+        displayContent = displayContent.replace(/\n{3,}/g, '\n\n');
+        
+        // Converter para HTML mantendo quebras de linha
+        displayContent = escapeHtml(displayContent).replace(/\n/g, '<br>');
+        
+        bubble.innerHTML = displayContent;
+        
+        const meta = document.createElement('div');
+        meta.className = 'reply-meta';
+        
+        const senderName = isSent ? 'Você' : (messageData.sender !== 'Desconhecido' ? messageData.sender.split('<')[0].trim() : 'Remetente');
+        const shortSender = senderName.length > 30 ? senderName.substring(0, 30) + '...' : senderName;
+        
+        meta.innerHTML = `<span>${shortSender}</span>${messageData.timestamp ? ' • <span>' + messageData.timestamp + '</span>' : ''}`;
+        
+        content.appendChild(bubble);
+        content.appendChild(meta);
+        
+        messageDiv.appendChild(avatar);
+        messageDiv.appendChild(content);
+        
+        return messageDiv;
+    }
 
     function extractEmailAddress(rawAddress) {
         const match = (rawAddress || '').match(/<([^>]+)>/);

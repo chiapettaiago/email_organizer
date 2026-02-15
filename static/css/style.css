@@ -1378,6 +1378,250 @@ a:hover {
     height: auto;
 }
 
+/* Search Info Message */
+.search-info {
+    padding: 0.75rem 1rem;
+    background: var(--accent-light);
+    color: var(--accent-primary);
+    border-radius: var(--border-radius-sm);
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-bottom: 1rem;
+}
+
+/* ===== Email Thread/Chat Interface ===== */
+.email-thread-container {
+    max-width: 920px;
+    margin: 0 auto;
+}
+
+.email-message-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--transition-fast);
+}
+
+.email-message-card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.message-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.message-avatar {
+    width: 48px;
+    height: 48px;
+    background: var(--accent-gradient);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: white;
+    flex-shrink: 0;
+}
+
+.message-info {
+    flex: 1;
+}
+
+.message-sender {
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.message-date {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.message-body {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--text-primary);
+}
+
+.message-body p {
+    margin-bottom: 1rem;
+}
+
+.message-body p:last-child {
+    margin-bottom: 0;
+}
+
+/* Reply Thread (Chat-style) */
+.reply-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 2px solid var(--border-color);
+}
+
+.reply-thread:empty {
+    display: none;
+}
+
+.thread-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    background: var(--accent-light);
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--border-radius);
+    animation: fadeIn 0.4s ease;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.thread-count {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--accent-primary);
+}
+
+.reply-message {
+    display: flex;
+    gap: 1rem;
+    animation: slideInUp 0.3s ease;
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.reply-message.sent {
+    flex-direction: row-reverse;
+}
+
+.reply-avatar {
+    width: 36px;
+    height: 36px;
+    background: var(--accent-gradient);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.875rem;
+    color: white;
+    flex-shrink: 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.reply-message.sent .reply-avatar {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.reply-content {
+    flex: 1;
+    max-width: 70%;
+}
+
+.reply-message.sent .reply-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.reply-bubble {
+    background: var(--bg-tertiary);
+    padding: 0.875rem 1.125rem;
+    border-radius: var(--border-radius);
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--text-primary);
+    word-wrap: break-word;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: box-shadow var(--transition-fast);
+}
+
+.reply-bubble:hover {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.reply-message.sent .reply-bubble {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.reply-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.375rem;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.reply-message.sent .reply-meta {
+    justify-content: flex-end;
+}
+
+/* Enhanced Quote Styling */
+.email-body-plain .email-quote {
+    margin: 1rem 0;
+    padding: 1rem 1.25rem;
+    border-left: 4px solid var(--accent-primary);
+    border-radius: 0 var(--border-radius-sm) var(--border-radius-sm) 0;
+    background: var(--accent-light);
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
+}
+
+/* Enhanced Signature Styling */
+.email-body-plain .email-signature {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 2px dashed var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    line-height: 1.6;
+}
+
+/* Enhanced Reply Header */
+.email-body-plain .email-reply-header {
+    margin: 1.25rem 0 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--accent-primary);
+    border-radius: 0 var(--border-radius-sm) var(--border-radius-sm) 0;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
 /* ===== Folders Page ===== */
 .folders-grid {
     display: grid;
@@ -2612,4 +2856,60 @@ body.gmail-theme {
     .login-features {
         display: none;
     }
+
+    /* Responsive styles for chat */
+    .email-message-card {
+        padding: 1rem;
+        border-radius: var(--border-radius-sm);
+    }
+
+    .message-avatar {
+        width: 40px;
+        height: 40px;
+        font-size: 1rem;
+    }
+
+    .message-sender {
+        font-size: 0.9375rem;
+    }
+
+    .message-body {
+        font-size: 0.9375rem;
+    }
+
+    .reply-content {
+        max-width: 75%;
+    }
+
+    .reply-avatar {
+        width: 32px;
+        height: 32px;
+        font-size: 0.8125rem;
+    }
+
+    .reply-bubble {
+        padding: 0.75rem 1rem;
+        font-size: 0.875rem;
+    }
+
+    .thread-indicator {
+        padding: 0.625rem 0.875rem;
+    }
+
+    .thread-count {
+        font-size: 0.875rem;
+    }
 }
+
+@media (max-width: 480px) {
+    .reply-content {
+        max-width: 85%;
+    }
+
+    .message-header {
+        gap: 0.75rem;
+    }
+
+    .email-thread-container {
+        padding: 0;
+    }
