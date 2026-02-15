@@ -4,10 +4,12 @@
 import os
 import json
 import re
+import copy
 from datetime import datetime
 from html import escape
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from functools import wraps
+from threading import RLock
 from markupsafe import Markup
 from email_service.connection import EmailConnection
 from email_service.spam_detector import SpamDetector
@@ -20,6 +22,7 @@ import atexit
 
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = int(os.getenv('STATIC_CACHE_TTL_SECONDS', '3600'))
 
 # Configurações Locaweb
 LOCAWEB_IMAP_SERVER = 'email-ssl.com.br'
@@ -29,6 +32,9 @@ LOCAWEB_SMTP_PORT = 465
 
 # Arquivo de configurações persistentes
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), 'user_config.json')
+_CONFIG_LOCK = RLock()
+_CONFIG_CACHE = None
+_CONFIG_CACHE_MTIME = None
 
 # Scheduler para tarefas agendadas
 scheduler = BackgroundScheduler()
@@ -38,9 +44,9 @@ scheduler.start()
 atexit.register(lambda: scheduler.shutdown())
 
 
-def load_config():
-    """Carrega configurações do arquivo JSON"""
-    default_config = {
+def _default_config():
+    """Retorna configuração padrão"""
+    return {
         'auto_delete_spam': True,
         'auto_delete_fraud': True,
         'spam_threshold': 70,
@@ -49,26 +55,55 @@ def load_config():
         'last_scan': None,
         'accounts': {}
     }
-    
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r') as f:
-                config = json.load(f)
-                # Merge with defaults for any missing keys
-                for key, value in default_config.items():
-                    if key not in config:
-                        config[key] = value
-                return config
-        except:
-            pass
-    
-    return default_config
+
+
+def _merge_config(config_data):
+    """Garante presença das chaves esperadas e tipos mínimos"""
+    merged = _default_config()
+    if isinstance(config_data, dict):
+        merged.update(config_data)
+    if not isinstance(merged.get('accounts'), dict):
+        merged['accounts'] = {}
+    return merged
+
+
+def load_config():
+    """Carrega configurações do arquivo JSON com cache em memória"""
+    global _CONFIG_CACHE, _CONFIG_CACHE_MTIME
+
+    with _CONFIG_LOCK:
+        file_mtime = os.path.getmtime(CONFIG_FILE) if os.path.exists(CONFIG_FILE) else None
+
+        if _CONFIG_CACHE is not None and file_mtime == _CONFIG_CACHE_MTIME:
+            return copy.deepcopy(_CONFIG_CACHE)
+
+        loaded = {}
+        if file_mtime is not None:
+            try:
+                with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+            except (OSError, ValueError, TypeError):
+                loaded = {}
+
+        merged = _merge_config(loaded)
+        _CONFIG_CACHE = merged
+        _CONFIG_CACHE_MTIME = file_mtime
+        return copy.deepcopy(merged)
 
 
 def save_config(config):
     """Salva configurações no arquivo JSON"""
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=2)
+    global _CONFIG_CACHE, _CONFIG_CACHE_MTIME
+
+    normalized = _merge_config(config)
+    temp_file = f'{CONFIG_FILE}.tmp'
+
+    with _CONFIG_LOCK:
+        with open(temp_file, 'w', encoding='utf-8') as f:
+            json.dump(normalized, f, indent=2)
+        os.replace(temp_file, CONFIG_FILE)
+        _CONFIG_CACHE = normalized
+        _CONFIG_CACHE_MTIME = os.path.getmtime(CONFIG_FILE)
 
 
 def get_admin_emails():
@@ -271,20 +306,24 @@ def scheduled_scan():
                 folder_manager.ensure_default_folders()
                 
                 # Busca e analisa e-mails
-                emails_list = conn.fetch_emails('INBOX', limit=200)
+                emails_list = conn.fetch_emails('INBOX', limit=200, include_body=True)
                 spam_count = 0
                 fraud_count = 0
-                
+                to_delete = []
+
                 for email_data in emails_list:
                     analysis = detector.analyze(email_data)
                     uid = email_data.get('uid', email_data.get('id', ''))
                     
                     if analysis['is_fraud'] and config.get('auto_delete_fraud', True):
-                        conn.move_to_trash(uid, 'INBOX')
+                        to_delete.append(uid)
                         fraud_count += 1
                     elif analysis['is_spam'] and config.get('auto_delete_spam', True):
-                        conn.move_to_trash(uid, 'INBOX')
+                        to_delete.append(uid)
                         spam_count += 1
+
+                if to_delete:
+                    conn.move_to_trash_bulk(to_delete, 'INBOX')
                 
                 conn.disconnect()
                 print(f"[{datetime.now()}] ✅ {email}: {spam_count} spam, {fraud_count} fraudes excluídos")
@@ -307,8 +346,14 @@ def setup_scheduler():
     
     if config.get('auto_scan_enabled', True):
         scan_time = config.get('auto_scan_time', '12:00')
-        hour, minute = map(int, scan_time.split(':'))
-        
+        try:
+            hour, minute = map(int, scan_time.split(':', 1))
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError
+        except ValueError:
+            hour, minute = 12, 0
+            scan_time = '12:00'
+
         scheduler.add_job(
             scheduled_scan,
             'cron',
@@ -506,7 +551,7 @@ def emails(folder='INBOX'):
     
     if conn and conn.connect():
         folders = conn.list_folders()
-        emails_list = conn.fetch_emails(folder, limit=50)
+        emails_list = conn.fetch_emails(folder, limit=50, include_body=False)
         conn.disconnect()
     
     return render_template('emails.html', 
@@ -557,8 +602,9 @@ def scan_emails():
     results = {'total_scanned': 0, 'spam_found': 0, 'fraud_found': 0, 'deleted': 0, 'items': []}
     
     if conn and conn.connect():
-        emails_list = conn.fetch_emails('INBOX', limit=100)
+        emails_list = conn.fetch_emails('INBOX', limit=100, include_body=True)
         results['total_scanned'] = len(emails_list)
+        to_delete = []
         
         for email_data in emails_list:
             analysis = detector.analyze(email_data)
@@ -588,10 +634,17 @@ def scan_emails():
                     should_delete = True
                 
                 if should_delete:
+                    to_delete.append(uid)
+
+        if to_delete:
+            if conn.move_to_trash_bulk(to_delete, 'INBOX'):
+                results['deleted'] = len(to_delete)
+            else:
+                for uid in to_delete:
                     try:
-                        conn.move_to_trash(uid, 'INBOX')
-                        results['deleted'] += 1
-                    except:
+                        if conn.move_to_trash(uid, 'INBOX'):
+                            results['deleted'] += 1
+                    except Exception:
                         pass
         
         conn.disconnect()
@@ -637,12 +690,15 @@ def delete_spam():
             folder_manager = FolderManager(conn)
             results = folder_manager.delete_spam_and_fraud(permanent=False)
         else:
-            for uid in uids:
-                try:
-                    conn.move_to_trash(uid, source_folder)
-                    results['deleted'] += 1
-                except Exception as e:
-                    results['errors'].append(str(e))
+            if conn.move_to_trash_bulk(uids, source_folder):
+                results['deleted'] = len(uids)
+            else:
+                for uid in uids:
+                    try:
+                        conn.move_to_trash(uid, source_folder)
+                        results['deleted'] += 1
+                    except Exception as e:
+                        results['errors'].append(str(e))
         conn.disconnect()
     
     return jsonify(results)
@@ -672,6 +728,28 @@ def email_action():
     if not conn or not conn.connect():
         return jsonify({'success': False, 'error': 'Não foi possível conectar à conta de e-mail'}), 500
 
+    # Usa caminho em lote primeiro para reduzir round-trips IMAP
+    bulk_ok = False
+    try:
+        if action == 'delete':
+            bulk_ok = conn.move_to_trash_bulk(uids, source_folder)
+        elif action == 'move':
+            bulk_ok = conn.move_emails(uids, source_folder, target_folder)
+        elif action == 'archive':
+            bulk_ok = conn.archive_emails_bulk(uids, source_folder)
+        elif action == 'mark_read':
+            bulk_ok = conn.set_read_status_bulk(uids, source_folder, True)
+        elif action == 'mark_unread':
+            bulk_ok = conn.set_read_status_bulk(uids, source_folder, False)
+    except Exception:
+        bulk_ok = False
+
+    if bulk_ok:
+        results['processed'] = len(uids)
+        conn.disconnect()
+        return jsonify(results)
+
+    # Fallback individual se o lote falhar
     for uid in uids:
         ok = False
         try:
@@ -814,8 +892,9 @@ def run_scan_now():
     results = {'scanned': 0, 'spam': 0, 'fraud': 0, 'deleted': 0}
     
     if conn and conn.connect():
-        emails_list = conn.fetch_emails('INBOX', limit=200)
+        emails_list = conn.fetch_emails('INBOX', limit=200, include_body=True)
         results['scanned'] = len(emails_list)
+        to_delete = []
         
         for email_data in emails_list:
             analysis = detector.analyze(email_data)
@@ -824,18 +903,21 @@ def run_scan_now():
             # Auto-exclui spam e fraude imediatamente
             if analysis['is_fraud']:
                 results['fraud'] += 1
-                try:
-                    conn.move_to_trash(uid, 'INBOX')
-                    results['deleted'] += 1
-                except:
-                    pass
+                to_delete.append(uid)
             elif analysis['is_spam']:
                 results['spam'] += 1
-                try:
-                    conn.move_to_trash(uid, 'INBOX')
-                    results['deleted'] += 1
-                except:
-                    pass
+                to_delete.append(uid)
+
+        if to_delete:
+            if conn.move_to_trash_bulk(to_delete, 'INBOX'):
+                results['deleted'] = len(to_delete)
+            else:
+                for uid in to_delete:
+                    try:
+                        if conn.move_to_trash(uid, 'INBOX'):
+                            results['deleted'] += 1
+                    except Exception:
+                        pass
         
         conn.disconnect()
         
@@ -861,7 +943,7 @@ def analise_interativa():
     }
     
     if conn and conn.connect():
-        emails_list = conn.fetch_emails('INBOX', limit=100)
+        emails_list = conn.fetch_emails('INBOX', limit=100, include_body=True)
         results['total_scanned'] = len(emails_list)
         
         for email_data in emails_list:
@@ -932,12 +1014,15 @@ def delete_multiple():
     results = {'deleted': 0, 'errors': 0}
     
     if conn and conn.connect():
-        for uid in uids:
-            try:
-                conn.move_to_trash(uid, folder)
-                results['deleted'] += 1
-            except:
-                results['errors'] += 1
+        if conn.move_to_trash_bulk(uids, folder):
+            results['deleted'] = len(uids)
+        else:
+            for uid in uids:
+                try:
+                    conn.move_to_trash(uid, folder)
+                    results['deleted'] += 1
+                except Exception:
+                    results['errors'] += 1
         conn.disconnect()
     
     return jsonify(results)

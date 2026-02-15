@@ -10,12 +10,21 @@ from email.mime.multipart import MIMEMultipart
 import ssl
 import re
 from typing import List, Dict, Optional
-from datetime import datetime
 
 
 class EmailConnection:
     """Gerencia conexões IMAP/SMTP com servidor Locaweb"""
-    
+
+    TRASH_FOLDER_CANDIDATES = ('Trash', 'Lixeira', 'Deleted', 'Deleted Items')
+    ARCHIVE_FOLDER_CANDIDATES = (
+        'Archive',
+        'Arquivo',
+        'All Mail',
+        'INBOX.Archive',
+        'Arquivados'
+    )
+    UID_PATTERN = re.compile(rb'UID (\d+)')
+
     def __init__(self, email_address: str, password: str,
                  imap_server: str, imap_port: int,
                  smtp_server: str, smtp_port: int):
@@ -27,7 +36,13 @@ class EmailConnection:
         self.smtp_port = smtp_port
         self.imap_conn = None
         self.smtp_conn = None
-    
+        self._folders_cache = None
+        self._trash_folder_cache = None
+        self._archive_folder_cache = None
+        self._selected_folder = None
+        self._selected_readonly = None
+        self._selected_message_count = 0
+
     def connect(self) -> bool:
         """Estabelece conexão IMAP com SSL"""
         try:
@@ -43,7 +58,7 @@ class EmailConnection:
             print(f"Erro na conexão IMAP: {e}")
             self.imap_conn = None
             return False
-    
+
     def disconnect(self):
         """Encerra conexões"""
         if self.imap_conn:
@@ -52,17 +67,64 @@ class EmailConnection:
             except:
                 pass
             self.imap_conn = None
-    
-    def list_folders(self) -> List[str]:
+        self._invalidate_folder_cache()
+        self._selected_folder = None
+        self._selected_readonly = None
+        self._selected_message_count = 0
+
+    def _invalidate_folder_cache(self):
+        """Limpa caches locais de pastas"""
+        self._folders_cache = None
+        self._trash_folder_cache = None
+        self._archive_folder_cache = None
+
+    def _ensure_selected(self, folder: str, readonly: bool = False) -> bool:
+        """Seleciona pasta apenas quando necessário"""
+        if not self.imap_conn:
+            return False
+
+        if self._selected_folder == folder and self._selected_readonly == readonly:
+            return True
+
+        try:
+            status, data = self.imap_conn.select(folder, readonly=readonly)
+            if status != 'OK':
+                return False
+
+            self._selected_folder = folder
+            self._selected_readonly = readonly
+            self._selected_message_count = self._parse_message_count(data)
+            return True
+        except Exception as e:
+            print(f"Erro ao selecionar pasta {folder}: {e}")
+            return False
+
+    def _parse_message_count(self, select_data) -> int:
+        """Extrai total de mensagens do retorno de select"""
+        if not select_data:
+            return 0
+
+        raw_total = select_data[0]
+        if isinstance(raw_total, bytes):
+            raw_total = raw_total.decode('utf-8', errors='ignore')
+        try:
+            return int(raw_total)
+        except (TypeError, ValueError):
+            return 0
+
+    def list_folders(self, force_refresh: bool = False) -> List[str]:
         """Lista todas as pastas do e-mail"""
         if not self.imap_conn:
             return []
-        
+
+        if self._folders_cache is not None and not force_refresh:
+            return list(self._folders_cache)
+
         try:
             status, folders = self.imap_conn.list()
             if status != 'OK':
                 return []
-            
+
             folder_list = []
             for folder in folders:
                 if isinstance(folder, bytes):
@@ -70,111 +132,154 @@ class EmailConnection:
                     match = re.search(rb'"([^"]+)"$|(\S+)$', folder)
                     if match:
                         folder_name = match.group(1) or match.group(2)
-                        folder_list.append(folder_name.decode('utf-8'))
-            
-            return folder_list
+                        folder_list.append(folder_name.decode('utf-8', errors='replace'))
+
+            self._folders_cache = folder_list
+            return list(folder_list)
         except Exception as e:
             print(f"Erro ao listar pastas: {e}")
             return []
-    
-    def fetch_emails(self, folder: str = 'INBOX', limit: int = 50) -> List[Dict]:
+
+    def _resolve_trash_folder(self) -> Optional[str]:
+        """Resolve e cacheia a pasta de lixeira"""
+        if self._trash_folder_cache is not None:
+            return self._trash_folder_cache
+
+        folders = set(self.list_folders())
+        for candidate in self.TRASH_FOLDER_CANDIDATES:
+            if candidate in folders:
+                self._trash_folder_cache = candidate
+                return candidate
+
+        self._trash_folder_cache = None
+        return None
+
+    def _resolve_archive_folder(self) -> Optional[str]:
+        """Resolve e cacheia a pasta de arquivo"""
+        if self._archive_folder_cache is not None:
+            return self._archive_folder_cache
+
+        folders = set(self.list_folders())
+        for candidate in self.ARCHIVE_FOLDER_CANDIDATES:
+            if candidate in folders:
+                self._archive_folder_cache = candidate
+                return candidate
+
+        # Tenta criar uma pasta padrão para arquivamento
+        if self.create_folder('Archive'):
+            self._archive_folder_cache = 'Archive'
+            return 'Archive'
+
+        return None
+
+    def fetch_emails(self, folder: str = 'INBOX', limit: int = 50, include_body: bool = False) -> List[Dict]:
         """Busca e-mails de uma pasta"""
-        if not self.imap_conn:
+        if not self.imap_conn or limit <= 0:
             return []
-        
+
         try:
-            status, _ = self.imap_conn.select(folder)
-            if status != 'OK':
+            if not self._ensure_selected(folder, readonly=True):
                 return []
-            
-            # Busca todos os e-mails
-            status, messages = self.imap_conn.search(None, 'ALL')
-            if status != 'OK':
+
+            total = self._selected_message_count
+            if total <= 0:
                 return []
-            
-            email_ids = messages[0].split()
-            # Pega os mais recentes primeiro
-            email_ids = list(reversed(email_ids[-limit:]))
-            
+
+            start = max(1, total - limit + 1)
+            fetch_query = '(UID FLAGS RFC822)' if include_body else '(UID FLAGS RFC822.HEADER)'
+
             emails = []
-            for email_id in email_ids:
-                email_data = self._fetch_email_data(email_id)
+            for sequence_num in range(total, start - 1, -1):
+                email_data = self._fetch_email_data(str(sequence_num), fetch_query, include_body=include_body)
                 if email_data:
                     emails.append(email_data)
-            
+
             return emails
         except Exception as e:
             print(f"Erro ao buscar e-mails: {e}")
             return []
-    
-    def _fetch_email_data(self, email_id: bytes) -> Optional[Dict]:
+
+    def _fetch_email_data(self, sequence_id: str, fetch_query: str, include_body: bool = False) -> Optional[Dict]:
         """Busca dados de um e-mail específico"""
         try:
-            status, msg_data = self.imap_conn.fetch(email_id, '(RFC822 FLAGS)')
+            status, msg_data = self.imap_conn.fetch(sequence_id, fetch_query)
             if status != 'OK':
                 return None
-            
+
             for response_part in msg_data:
                 if isinstance(response_part, tuple):
+                    raw_meta = response_part[0]
                     msg = email.message_from_bytes(response_part[1])
-                    
+
                     # Decodifica assunto
                     subject = self._decode_header(msg['Subject'])
-                    
+
                     # Decodifica remetente
                     from_addr = self._decode_header(msg['From'])
-                    
+
                     # Data
                     date_str = msg['Date']
-                    
+
                     # Verifica se foi lido
-                    flags = response_part[0].decode() if isinstance(response_part[0], bytes) else str(response_part[0])
+                    flags = raw_meta.decode(errors='ignore') if isinstance(raw_meta, bytes) else str(raw_meta)
                     is_read = '\\Seen' in flags
-                    
+
                     # UID
-                    uid_match = re.search(rb'UID (\d+)', response_part[0]) if isinstance(response_part[0], bytes) else None
-                    uid = uid_match.group(1).decode() if uid_match else email_id.decode()
-                    
-                    return {
+                    uid = sequence_id
+                    if isinstance(raw_meta, bytes):
+                        uid_match = self.UID_PATTERN.search(raw_meta)
+                        if uid_match:
+                            uid = uid_match.group(1).decode('utf-8', errors='ignore')
+
+                    data = {
                         'uid': uid,
-                        'id': email_id.decode(),
+                        'id': sequence_id,
                         'subject': subject or '(Sem assunto)',
                         'from': from_addr or '(Desconhecido)',
                         'date': date_str,
-                        'is_read': is_read,
-                        'raw_msg': msg
+                        'is_read': is_read
                     }
+
+                    if include_body:
+                        data['body'] = self._get_email_body(msg)
+                        data['headers'] = {
+                            'received': msg.get_all('Received', []),
+                            'spf': msg.get('Received-SPF', ''),
+                            'dkim': msg.get('DKIM-Signature', ''),
+                            'reply-to': msg.get('Reply-To', '')
+                        }
+
+                    return data
             return None
         except Exception as e:
             print(f"Erro ao processar e-mail: {e}")
             return None
-    
+
     def fetch_email_by_uid(self, folder: str, uid: str) -> Optional[Dict]:
         """Busca um e-mail específico por UID"""
         if not self.imap_conn:
             return None
-        
+
         try:
-            status, _ = self.imap_conn.select(folder)
-            if status != 'OK':
+            if not self._ensure_selected(folder, readonly=True):
                 return None
-            
+
             status, msg_data = self.imap_conn.uid('fetch', uid, '(RFC822)')
             if status != 'OK':
                 return None
-            
+
             for response_part in msg_data:
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
-                    
+
                     subject = self._decode_header(msg['Subject'])
                     from_addr = self._decode_header(msg['From'])
                     to_addr = self._decode_header(msg['To'])
                     date_str = msg['Date']
-                    
+
                     # Extrai corpo do e-mail
                     body = self._get_email_body(msg)
-                    
+
                     # Headers para análise de spam
                     headers = {
                         'received': msg.get_all('Received', []),
@@ -182,7 +287,7 @@ class EmailConnection:
                         'dkim': msg.get('DKIM-Signature', ''),
                         'reply-to': msg.get('Reply-To', '')
                     }
-                    
+
                     return {
                         'uid': uid,
                         'subject': subject or '(Sem assunto)',
@@ -197,12 +302,12 @@ class EmailConnection:
         except Exception as e:
             print(f"Erro ao buscar e-mail por UID: {e}")
             return None
-    
+
     def _decode_header(self, header: str) -> str:
         """Decodifica header de e-mail"""
         if not header:
             return ''
-        
+
         try:
             decoded_parts = decode_header(header)
             result = []
@@ -218,16 +323,16 @@ class EmailConnection:
             return ' '.join(result)
         except:
             return str(header)
-    
+
     def _get_email_body(self, msg) -> str:
         """Extrai corpo do e-mail"""
         body = ''
-        
+
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
                 content_disposition = str(part.get('Content-Disposition', ''))
-                
+
                 if content_type == 'text/plain' and 'attachment' not in content_disposition:
                     try:
                         payload = part.get_payload(decode=True)
@@ -250,9 +355,9 @@ class EmailConnection:
                 body = payload.decode(charset, errors='replace')
             except:
                 body = str(msg.get_payload())
-        
+
         return body
-    
+
     def get_stats(self) -> Dict:
         """Obtém estatísticas do e-mail"""
         stats = {
@@ -261,112 +366,166 @@ class EmailConnection:
             'spam': 0,
             'folders': []
         }
-        
+
         if not self.imap_conn:
             return stats
-        
+
         try:
             folders = self.list_folders()
             stats['folders'] = folders
-            
+
             # Conta e-mails na INBOX
-            status, _ = self.imap_conn.select('INBOX')
-            if status == 'OK':
+            if self._ensure_selected('INBOX', readonly=True):
                 status, messages = self.imap_conn.search(None, 'ALL')
                 if status == 'OK':
                     stats['total'] = len(messages[0].split())
-                
+
                 status, unseen = self.imap_conn.search(None, 'UNSEEN')
                 if status == 'OK':
                     stats['unread'] = len(unseen[0].split()) if unseen[0] else 0
-            
+
             # Conta spam se a pasta existir
             if 'Spam' in folders or 'SPAM' in folders or 'Junk' in folders:
                 spam_folder = 'Spam' if 'Spam' in folders else ('SPAM' if 'SPAM' in folders else 'Junk')
-                status, _ = self.imap_conn.select(spam_folder)
-                if status == 'OK':
+                if self._ensure_selected(spam_folder, readonly=True):
                     status, messages = self.imap_conn.search(None, 'ALL')
                     if status == 'OK':
                         stats['spam'] = len(messages[0].split()) if messages[0] else 0
-            
+
             return stats
         except Exception as e:
             print(f"Erro ao obter estatísticas: {e}")
             return stats
-    
+
     def create_folder(self, folder_name: str) -> bool:
         """Cria uma nova pasta"""
         if not self.imap_conn:
             return False
-        
+
         try:
             status, _ = self.imap_conn.create(folder_name)
+            if status == 'OK':
+                self._invalidate_folder_cache()
             return status == 'OK'
         except Exception as e:
             print(f"Erro ao criar pasta: {e}")
             return False
-    
+
     def delete_folder(self, folder_name: str) -> bool:
         """Deleta uma pasta"""
         if not self.imap_conn:
             return False
-        
+
         try:
             status, _ = self.imap_conn.delete(folder_name)
+            if status == 'OK':
+                self._invalidate_folder_cache()
             return status == 'OK'
         except Exception as e:
             print(f"Erro ao deletar pasta: {e}")
             return False
-    
-    def move_email(self, uid: str, from_folder: str, to_folder: str) -> bool:
+
+    def move_email(self, uid: str, from_folder: str, to_folder: str, expunge: bool = True) -> bool:
         """Move um e-mail de uma pasta para outra"""
         if not self.imap_conn:
             return False
-        
+
         try:
-            self.imap_conn.select(from_folder)
+            if not self._ensure_selected(from_folder, readonly=False):
+                return False
+
             # Copia para a pasta destino
             status, _ = self.imap_conn.uid('copy', uid, to_folder)
             if status == 'OK':
                 # Marca para deleção na pasta original
                 self.imap_conn.uid('store', uid, '+FLAGS', '\\Deleted')
-                self.imap_conn.expunge()
+                if expunge:
+                    self.imap_conn.expunge()
                 return True
             return False
         except Exception as e:
             print(f"Erro ao mover e-mail: {e}")
             return False
-    
-    def move_to_trash(self, uid: str, from_folder: str = 'INBOX') -> bool:
-        """Move e-mail para a lixeira"""
-        trash_folders = ['Trash', 'Lixeira', 'Deleted', 'Deleted Items']
-        folders = self.list_folders()
-        
-        trash_folder = None
-        for tf in trash_folders:
-            if tf in folders:
-                trash_folder = tf
-                break
-        
-        if trash_folder:
-            return self.move_email(uid, from_folder, trash_folder)
-        else:
-            # Se não encontrar lixeira, marca para deleção
-            try:
-                self.imap_conn.select(from_folder)
-                self.imap_conn.uid('store', uid, '+FLAGS', '\\Deleted')
-                self.imap_conn.expunge()
-                return True
-            except:
+
+    def move_emails(self, uids: List[str], from_folder: str, to_folder: str, expunge: bool = True) -> bool:
+        """Move múltiplos e-mails de uma pasta para outra"""
+        if not self.imap_conn or not uids:
+            return False
+
+        try:
+            if not self._ensure_selected(from_folder, readonly=False):
                 return False
-    
+
+            uid_set = ','.join(dict.fromkeys(str(uid) for uid in uids if uid))
+            if not uid_set:
+                return False
+
+            status, _ = self.imap_conn.uid('copy', uid_set, to_folder)
+            if status != 'OK':
+                return False
+
+            status, _ = self.imap_conn.uid('store', uid_set, '+FLAGS', '\\Deleted')
+            if status != 'OK':
+                return False
+
+            if expunge:
+                self.imap_conn.expunge()
+
+            return True
+        except Exception as e:
+            print(f"Erro ao mover e-mails em lote: {e}")
+            return False
+
+    def move_to_trash(self, uid: str, from_folder: str = 'INBOX', expunge: bool = True) -> bool:
+        """Move e-mail para a lixeira"""
+        trash_folder = self._resolve_trash_folder()
+
+        if trash_folder:
+            return self.move_email(uid, from_folder, trash_folder, expunge=expunge)
+
+        # Se não encontrar lixeira, marca para deleção na própria pasta
+        try:
+            if not self._ensure_selected(from_folder, readonly=False):
+                return False
+            self.imap_conn.uid('store', uid, '+FLAGS', '\\Deleted')
+            if expunge:
+                self.imap_conn.expunge()
+            return True
+        except Exception:
+            return False
+
+    def move_to_trash_bulk(self, uids: List[str], from_folder: str = 'INBOX', expunge: bool = True) -> bool:
+        """Move múltiplos e-mails para lixeira"""
+        if not uids:
+            return False
+
+        trash_folder = self._resolve_trash_folder()
+        if trash_folder:
+            return self.move_emails(uids, from_folder, trash_folder, expunge=expunge)
+
+        try:
+            if not self._ensure_selected(from_folder, readonly=False):
+                return False
+            uid_set = ','.join(dict.fromkeys(str(uid) for uid in uids if uid))
+            if not uid_set:
+                return False
+            status, _ = self.imap_conn.uid('store', uid_set, '+FLAGS', '\\Deleted')
+            if status != 'OK':
+                return False
+            if expunge:
+                self.imap_conn.expunge()
+            return True
+        except Exception:
+            return False
+
     def set_read_status(self, uid: str, folder: str = 'INBOX', is_read: bool = True) -> bool:
         """Marca e-mail como lido ou não lido"""
         if not self.imap_conn:
             return False
 
         try:
-            self.imap_conn.select(folder)
+            if not self._ensure_selected(folder, readonly=False):
+                return False
             flag_action = '+FLAGS' if is_read else '-FLAGS'
             status, _ = self.imap_conn.uid('store', uid, flag_action, '\\Seen')
             return status == 'OK'
@@ -374,34 +533,47 @@ class EmailConnection:
             print(f"Erro ao atualizar status de leitura: {e}")
             return False
 
-    def archive_email(self, uid: str, from_folder: str = 'INBOX') -> bool:
+    def set_read_status_bulk(self, uids: List[str], folder: str = 'INBOX', is_read: bool = True) -> bool:
+        """Marca múltiplos e-mails como lidos ou não lidos"""
+        if not self.imap_conn or not uids:
+            return False
+
+        try:
+            if not self._ensure_selected(folder, readonly=False):
+                return False
+
+            uid_set = ','.join(dict.fromkeys(str(uid) for uid in uids if uid))
+            if not uid_set:
+                return False
+
+            flag_action = '+FLAGS' if is_read else '-FLAGS'
+            status, _ = self.imap_conn.uid('store', uid_set, flag_action, '\\Seen')
+            return status == 'OK'
+        except Exception as e:
+            print(f"Erro ao atualizar status de leitura em lote: {e}")
+            return False
+
+    def archive_email(self, uid: str, from_folder: str = 'INBOX', expunge: bool = True) -> bool:
         """Move e-mail para a pasta de arquivo"""
         if not self.imap_conn:
             return False
 
-        folders = self.list_folders()
-        archive_candidates = [
-            'Archive',
-            'Arquivo',
-            'All Mail',
-            'INBOX.Archive',
-            'Arquivados'
-        ]
-
-        archive_folder = None
-        for candidate in archive_candidates:
-            if candidate in folders:
-                archive_folder = candidate
-                break
-
+        archive_folder = self._resolve_archive_folder()
         if not archive_folder:
-            # Tenta criar uma pasta de arquivo padrão se não existir
-            if self.create_folder('Archive'):
-                archive_folder = 'Archive'
-            else:
-                return False
+            return False
 
-        return self.move_email(uid, from_folder, archive_folder)
+        return self.move_email(uid, from_folder, archive_folder, expunge=expunge)
+
+    def archive_emails_bulk(self, uids: List[str], from_folder: str = 'INBOX', expunge: bool = True) -> bool:
+        """Move múltiplos e-mails para a pasta de arquivo"""
+        if not self.imap_conn or not uids:
+            return False
+
+        archive_folder = self._resolve_archive_folder()
+        if not archive_folder:
+            return False
+
+        return self.move_emails(uids, from_folder, archive_folder, expunge=expunge)
 
     def send_email(
         self,

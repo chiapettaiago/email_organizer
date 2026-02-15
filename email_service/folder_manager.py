@@ -47,7 +47,7 @@ class FolderManager:
             return results
         
         # Busca e-mails da INBOX
-        emails = self.conn.fetch_emails('INBOX', limit=100)
+        emails = self.conn.fetch_emails('INBOX', limit=100, include_body=True)
         
         for email_data in emails:
             try:
@@ -159,19 +159,32 @@ class FolderManager:
             try:
                 emails = self.conn.fetch_emails(folder, limit=500)
                 
-                for email_data in emails:
-                    uid = email_data.get('uid', email_data.get('id', ''))
-                    try:
-                        if permanent:
-                            # Deleta permanentemente
-                            self.conn.imap_conn.select(folder)
-                            self.conn.imap_conn.uid('store', uid, '+FLAGS', '\\Deleted')
-                        else:
-                            # Move para lixeira
-                            self.conn.move_to_trash(uid, folder)
-                        results['deleted'] += 1
-                    except Exception as e:
-                        results['errors'].append(f"{folder}/{uid}: {str(e)}")
+                uids = [email_data.get('uid', email_data.get('id', '')) for email_data in emails]
+                uids = [uid for uid in uids if uid]
+
+                if not uids:
+                    continue
+
+                if permanent:
+                    # Deleta permanentemente em lote
+                    self.conn.imap_conn.select(folder)
+                    uid_set = ','.join(dict.fromkeys(uids))
+                    status, _ = self.conn.imap_conn.uid('store', uid_set, '+FLAGS', '\\Deleted')
+                    if status == 'OK':
+                        results['deleted'] += len(uids)
+                    else:
+                        results['errors'].append(f"Erro ao marcar exclusão em {folder}")
+                else:
+                    # Move todos para lixeira em lote
+                    if self.conn.move_to_trash_bulk(uids, folder):
+                        results['deleted'] += len(uids)
+                    else:
+                        for uid in uids:
+                            try:
+                                if self.conn.move_to_trash(uid, folder):
+                                    results['deleted'] += 1
+                            except Exception as e:
+                                results['errors'].append(f"{folder}/{uid}: {str(e)}")
                 
                 if permanent:
                     self.conn.imap_conn.expunge()
