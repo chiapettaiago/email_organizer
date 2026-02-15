@@ -46,7 +46,7 @@
         </div>
 
         <nav class="sidebar-nav">
-            <a href="{{ url_for('emails') }}" class="gmail-compose-btn">
+            <a href="{{ url_for('emails', compose=1) }}" class="gmail-compose-btn js-compose-trigger">
                 <span class="gmail-compose-icon">✎</span>
                 <span class="gmail-compose-text">Escrever</span>
             </a>
@@ -225,6 +225,17 @@
                 globalSearchInput.focus();
             }
         };
+
+        // Abre modal de composição quando disponível na página atual.
+        // Em páginas sem modal, mantém fallback para /emails?compose=1.
+        document.querySelectorAll('.js-compose-trigger').forEach((trigger) => {
+            trigger.addEventListener('click', (event) => {
+                if (typeof window.openComposeModal === 'function') {
+                    event.preventDefault();
+                    window.openComposeModal();
+                }
+            });
+        });
     </script>
     {% block extra_js %}{% endblock %}
 </body>

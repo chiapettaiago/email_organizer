@@ -6,7 +6,7 @@ import json
 import re
 import copy
 from datetime import datetime
-from html import escape
+from html import escape, unescape
 from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 from functools import wraps
 from threading import RLock
@@ -159,6 +159,11 @@ def body_looks_like_html(body_text: str) -> bool:
 def normalize_plain_email_text(body_text: str) -> str:
     """Normaliza texto plano de e-mail para melhorar leitura"""
     text = (body_text or '').replace('\r\n', '\n').replace('\r', '\n')
+
+    # Alguns provedores entregam texto com entidades HTML em corpo plain/text.
+    # Decodifica para evitar exibir "&nbsp;" e "&aacute;" literalmente.
+    if '&' in text:
+        text = unescape(text).replace('\xa0', ' ')
 
     # Alguns servidores retornam citações inline como " > " sem quebra de linha.
     if text.count('\n') < 3 and ' > ' in text:

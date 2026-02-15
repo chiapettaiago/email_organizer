@@ -4,11 +4,11 @@
   "spam_threshold": 70,
   "auto_scan_enabled": true,
   "auto_scan_time": "12:00",
-  "last_scan": "2026-02-15T18:53:03.763800",
+  "last_scan": "2026-02-15T19:04:37.766308",
   "accounts": {
     "contato@isna.org.br": {
       "password": "Cristovive12!",
-      "last_login": "2026-02-15T18:52:31.724283"
+      "last_login": "2026-02-15T19:00:28.481016"
     }
   }
 }
