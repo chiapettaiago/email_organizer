@@ -9,6 +9,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import ssl
 import re
+import socket
 from typing import List, Dict, Optional
 
 
@@ -42,19 +43,46 @@ class EmailConnection:
         self._selected_folder = None
         self._selected_readonly = None
         self._selected_message_count = 0
+        self.last_error = ''
 
     def connect(self) -> bool:
         """Estabelece conexão IMAP com SSL"""
+        self.last_error = ''
         try:
             context = ssl.create_default_context()
             self.imap_conn = imaplib.IMAP4_SSL(
                 self.imap_server, 
                 self.imap_port,
-                ssl_context=context
+                ssl_context=context,
+                timeout=15
             )
             self.imap_conn.login(self.email_address, self.password)
             return True
+        except imaplib.IMAP4.error as e:
+            self.last_error = (
+                'Credenciais recusadas pelo servidor de e-mail. '
+                'Confira a senha da caixa, se o IMAP está habilitado e se o provedor exige o e-mail completo como usuário.'
+            )
+            print(f"Erro na autenticação IMAP: {e}")
+            self.imap_conn = None
+            return False
+        except socket.gaierror as e:
+            self.last_error = 'Não foi possível resolver o servidor IMAP. Verifique a rede e o servidor configurado.'
+            print(f"Erro de DNS na conexão IMAP: {e}")
+            self.imap_conn = None
+            return False
+        except (socket.timeout, TimeoutError) as e:
+            self.last_error = 'Tempo esgotado ao conectar no servidor IMAP.'
+            print(f"Timeout na conexão IMAP: {e}")
+            self.imap_conn = None
+            return False
+        except ssl.SSLError as e:
+            self.last_error = 'Falha SSL/TLS ao conectar no servidor IMAP.'
+            print(f"Erro SSL na conexão IMAP: {e}")
+            self.imap_conn = None
+            return False
         except Exception as e:
+            self.last_error = f'Falha ao conectar no servidor IMAP: {e}'
             print(f"Erro na conexão IMAP: {e}")
             self.imap_conn = None
             return False
@@ -172,9 +200,11 @@ class EmailConnection:
 
         return None
 
-    def fetch_emails(self, folder: str = 'INBOX', limit: int = 50, include_body: bool = False) -> List[Dict]:
+    def fetch_emails(self, folder: str = 'INBOX', limit: Optional[int] = 50, include_body: bool = False) -> List[Dict]:
         """Busca e-mails de uma pasta"""
-        if not self.imap_conn or limit <= 0:
+        if not self.imap_conn:
+            return []
+        if limit is not None and limit <= 0:
             return []
 
         try:
@@ -185,7 +215,7 @@ class EmailConnection:
             if total <= 0:
                 return []
 
-            start = max(1, total - limit + 1)
+            start = 1 if limit is None else max(1, total - limit + 1)
             fetch_query = '(UID FLAGS RFC822)' if include_body else '(UID FLAGS RFC822.HEADER)'
 
             emails = []
@@ -242,10 +272,15 @@ class EmailConnection:
 
                     if include_body:
                         data['body'] = self._get_email_body(msg)
+                        data['html_body'] = self._get_email_html_body(msg)
+                        data['attachments'] = self._get_attachments(msg)
                         data['headers'] = {
                             'received': msg.get_all('Received', []),
+                            'authentication-results': msg.get('Authentication-Results', ''),
+                            'received-spf': msg.get('Received-SPF', ''),
                             'spf': msg.get('Received-SPF', ''),
                             'dkim': msg.get('DKIM-Signature', ''),
+                            'dmarc': msg.get('DMARC-Filter', ''),
                             'reply-to': msg.get('Reply-To', '')
                         }
 
@@ -279,12 +314,17 @@ class EmailConnection:
 
                     # Extrai corpo do e-mail
                     body = self._get_email_body(msg)
+                    html_body = self._get_email_html_body(msg)
+                    attachments = self._get_attachments(msg)
 
                     # Headers para análise de spam
                     headers = {
                         'received': msg.get_all('Received', []),
+                        'authentication-results': msg.get('Authentication-Results', ''),
+                        'received-spf': msg.get('Received-SPF', ''),
                         'spf': msg.get('Received-SPF', ''),
                         'dkim': msg.get('DKIM-Signature', ''),
+                        'dmarc': msg.get('DMARC-Filter', ''),
                         'reply-to': msg.get('Reply-To', '')
                     }
 
@@ -295,6 +335,8 @@ class EmailConnection:
                         'to': to_addr,
                         'date': date_str,
                         'body': body,
+                        'html_body': html_body,
+                        'attachments': attachments,
                         'headers': headers,
                         'raw_msg': msg
                     }
@@ -357,6 +399,48 @@ class EmailConnection:
                 body = str(msg.get_payload())
 
         return body
+
+    def _get_email_html_body(self, msg) -> str:
+        """Extrai corpo HTML do e-mail quando disponível."""
+        if not msg:
+            return ''
+
+        try:
+            parts = msg.walk() if msg.is_multipart() else [msg]
+            for part in parts:
+                content_type = part.get_content_type()
+                content_disposition = str(part.get('Content-Disposition', ''))
+
+                if content_type == 'text/html' and 'attachment' not in content_disposition:
+                    payload = part.get_payload(decode=True)
+                    if not payload:
+                        continue
+                    charset = part.get_content_charset() or 'utf-8'
+                    return payload.decode(charset, errors='replace')
+        except Exception:
+            return ''
+
+        return ''
+
+    def _get_attachments(self, msg) -> List[Dict]:
+        """Lista anexos sem carregar conteúdo para a lógica de risco."""
+        attachments = []
+        if not msg:
+            return attachments
+
+        try:
+            for part in msg.walk():
+                filename = self._decode_header(part.get_filename() or '')
+                disposition = str(part.get('Content-Disposition', '')).lower()
+                if filename or 'attachment' in disposition:
+                    attachments.append({
+                        'filename': filename,
+                        'content_type': part.get_content_type(),
+                    })
+        except Exception as e:
+            print(f"Erro ao listar anexos: {e}")
+
+        return attachments
 
     def get_stats(self) -> Dict:
         """Obtém estatísticas do e-mail"""

@@ -3,15 +3,23 @@
 
 import os
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs):
+        return False
+
+load_dotenv()
+
 # Configurações do servidor Locaweb
 LOCAWEB_CONFIG = {
-    'IMAP_SERVER': 'email-ssl.com.br',
-    'IMAP_PORT': 993,
-    'SMTP_SERVER': 'email-ssl.com.br',
-    'SMTP_PORT': 465,  # SSL/TLS
-    'SMTP_PORT_STARTTLS': 587,  # STARTTLS alternativo
+    'IMAP_SERVER': os.getenv('IMAP_SERVER', 'email-ssl.com.br'),
+    'IMAP_PORT': int(os.getenv('IMAP_PORT', '993')),
+    'SMTP_SERVER': os.getenv('SMTP_SERVER', 'email-ssl.com.br'),
+    'SMTP_PORT': int(os.getenv('SMTP_PORT', '465')),  # SSL/TLS
+    'SMTP_PORT_STARTTLS': int(os.getenv('SMTP_PORT_STARTTLS', '587')),  # STARTTLS alternativo
     'USE_SSL': True,
-    'DEFAULT_EMAIL': 'contato@isna.org.br'  # Email padrão configurado
+    'DEFAULT_EMAIL': os.getenv('DEFAULT_EMAIL', 'contato@isna.org.br')  # Email padrão configurado
 }
 
 # Pastas padrão para organização
@@ -20,7 +28,8 @@ DEFAULT_FOLDERS = [
     'Pessoal',
     'Newsletters',
     'Spam',
-    'Fraude'
+    'Fraude',
+    'Quarentena/Fraude'
 ]
 
 # Configurações de detecção de spam
@@ -28,6 +37,41 @@ SPAM_CONFIG = {
     'THRESHOLD': 70,  # Score mínimo para considerar spam (0-100)
     'AUTO_DELETE': False,  # Se True, deleta automaticamente
     'QUARANTINE_DAYS': 30  # Dias para manter em quarentena
+}
+
+# Configuração padrão do motor de risco. Pode ser sobrescrita em user_config.json
+# pela chave "fraud_risk".
+FRAUD_RISK_CONFIG = {
+    'safe_threshold': 35,
+    'quarantine_threshold': 55,
+    'delete_threshold': 90,
+    'dry_run': False,
+    'quarantine_enabled': True,
+    'quarantine_folder': 'Quarentena/Fraude',
+    'log_file': os.getenv('FRAUD_LOG_FILE', 'logs/fraud_decisions.jsonl'),
+    'allowed_domains': [],
+    'trusted_senders': [],
+    'blocked_domains': [],
+    'blocked_attachment_extensions': [
+        '.exe', '.scr', '.bat', '.cmd', '.js', '.vbs', '.jar', '.zip', '.rar', '.iso'
+    ],
+    'suspicious_keywords': [
+        'urgente', 'ameaça', 'bloqueio', 'bloqueado', 'cobrança', 'cobranca',
+        'prêmio', 'premio', 'senha', 'pix', 'boleto', 'nota fiscal',
+        'nf-e', 'nfe', 'token', 'código', 'codigo', 'transferência',
+        'transferencia', 'atualização cadastral', 'atualizacao cadastral',
+        'regularize', 'pendência', 'pendencia', 'suspensão', 'suspensao'
+    ],
+    'sensitive_brands': [
+        'banco', 'bradesco', 'itau', 'itaú', 'santander', 'caixa',
+        'nubank', 'inter', 'mercadopago', 'mercado pago', 'gov',
+        'govbr', 'receita', 'correios', 'microsoft', 'google',
+        'apple', 'paypal', 'amazon', 'meta', 'instagram', 'whatsapp'
+    ],
+    'shortener_domains': [
+        'bit.ly', 'goo.gl', 'tinyurl.com', 'ow.ly', 'is.gd', 't.co',
+        'buff.ly', 'cutt.ly', 'rebrand.ly', 'lnkd.in', 's.id'
+    ]
 }
 
 # Palavras-chave de spam (português e inglês)

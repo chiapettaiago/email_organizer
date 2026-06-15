@@ -8,7 +8,7 @@
     <meta name="description" content="Organizador inteligente de e-mails com detecção de spam e fraude">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
@@ -70,6 +70,11 @@
                 <span class="sidebar-icon">⚠</span>
                 <span class="sidebar-text">Análise</span>
             </a>
+            <a href="{{ url_for('system_logs') }}"
+                class="sidebar-link {% if request.endpoint == 'system_logs' %}active{% endif %}">
+                <span class="sidebar-icon">≡</span>
+                <span class="sidebar-text">Logs</span>
+            </a>
             <a href="{{ url_for('settings') }}"
                 class="sidebar-link {% if request.endpoint == 'settings' %}active{% endif %}">
                 <span class="sidebar-icon">⚙</span>
@@ -130,6 +135,11 @@
             class="mobile-bottom-link {% if request.endpoint == 'analise_interativa' %}active{% endif %}">
             <span class="mobile-bottom-icon">🔍</span>
             <span class="mobile-bottom-text">Análise</span>
+        </a>
+        <a href="{{ url_for('system_logs') }}"
+            class="mobile-bottom-link {% if request.endpoint == 'system_logs' %}active{% endif %}">
+            <span class="mobile-bottom-icon">≡</span>
+            <span class="mobile-bottom-text">Logs</span>
         </a>
         <a href="{{ url_for('settings') }}"
             class="mobile-bottom-link {% if request.endpoint == 'settings' %}active{% endif %}">

@@ -5,170 +5,80 @@
 {% block content %}
 <div class="analise-page">
     <header class="page-header">
-        <h1>🔍 Análise de E-mails</h1>
-        <p class="page-subtitle">Revise os e-mails detectados como spam ou fraude antes de excluir</p>
+        <h1>Análise de E-mails</h1>
+        <p class="page-subtitle">Execute a análise quando quiser revisar detecções e ações registradas pelo sistema.</p>
     </header>
 
-    <!-- Resumo -->
+    <section class="analysis-control">
+        <button type="button" class="btn btn-primary" id="btn-run-analysis">
+            Iniciar análise agora
+        </button>
+        <span class="analysis-status" id="analysis-status">Nenhuma análise executada nesta tela.</span>
+    </section>
+
     <div class="summary-cards">
         <div class="summary-card total">
-            <div class="card-icon">📧</div>
             <div class="card-info">
-                <span class="card-value">{{ results.total_scanned }}</span>
+                <span class="card-value" id="metric-scanned">0</span>
                 <span class="card-label">Analisados</span>
             </div>
         </div>
         <div class="summary-card safe">
-            <div class="card-icon">✅</div>
             <div class="card-info">
-                <span class="card-value">{{ results.safe_count }}</span>
-                <span class="card-label">Seguros</span>
+                <span class="card-value" id="metric-safe">0</span>
+                <span class="card-label">Mantidos</span>
             </div>
         </div>
         <div class="summary-card spam">
-            <div class="card-icon">🚫</div>
             <div class="card-info">
-                <span class="card-value">{{ results.spam_list|length }}</span>
-                <span class="card-label">Spam</span>
+                <span class="card-value" id="metric-spam">0</span>
+                <span class="card-label">Spam/Suspeitos</span>
             </div>
         </div>
         <div class="summary-card fraud">
-            <div class="card-icon">⚠️</div>
             <div class="card-info">
-                <span class="card-value">{{ results.fraud_list|length }}</span>
-                <span class="card-label">Fraude</span>
+                <span class="card-value" id="metric-fraud">0</span>
+                <span class="card-label">Fraudes</span>
             </div>
         </div>
     </div>
 
-    <!-- Ações em massa -->
-    {% if results.fraud_list or results.spam_list %}
-    <div class="bulk-actions">
-        <button type="button" class="btn btn-danger" id="btn-delete-all">
-            <span class="btn-icon">🗑️</span>
-            Excluir Todos Selecionados
-        </button>
-        <button type="button" class="btn btn-secondary" id="btn-select-all">
-            <span class="btn-icon">☑️</span>
-            Selecionar Todos
-        </button>
-    </div>
-    {% endif %}
-
-    <!-- Lista de Fraudes -->
-    {% if results.fraud_list %}
-    <section class="email-section fraud-section">
+    <section class="analysis-results">
         <div class="section-header">
-            <h2>⚠️ Tentativas de Fraude ({{ results.fraud_list|length }})</h2>
-            <span class="badge badge-danger">Alto Risco</span>
+            <h2>Resultados</h2>
+            <span class="badge badge-neutral" id="metric-actions">0 ações</span>
         </div>
-
-        <div class="email-list">
-            {% for email in results.fraud_list %}
-            <div class="email-item fraud" data-uid="{{ email.uid }}">
-                <div class="email-checkbox">
-                    <input type="checkbox" class="email-select" value="{{ email.uid }}">
-                </div>
-                <div class="email-content">
-                    <div class="email-header">
-                        <span class="email-from">{{ email.from }}</span>
-                        <span class="email-date">{{ email.date }}</span>
-                    </div>
-                    <div class="email-subject">{{ email.subject }}</div>
-                    <div class="email-reasons">
-                        <span class="score-badge">Score: {{ email.score }}%</span>
-                        {% for reason in email.reasons[:3] %}
-                        <span class="reason-tag">{{ reason }}</span>
-                        {% endfor %}
-                    </div>
-                </div>
-                <div class="email-actions">
-                    <button type="button" class="btn btn-sm btn-danger btn-delete" data-uid="{{ email.uid }}"
-                        title="Excluir">
-                        🗑️
-                    </button>
-                    <button type="button" class="btn btn-sm btn-secondary btn-keep" data-uid="{{ email.uid }}"
-                        title="Manter">
-                        ✓
-                    </button>
-                </div>
+        <div class="email-list" id="analysis-results-list">
+            <div class="empty-state">
+                <h2>Aguardando análise</h2>
+                <p>Clique no botão acima para analisar a caixa inteira. As decisões serão registradas nos logs.</p>
             </div>
-            {% endfor %}
         </div>
     </section>
-    {% endif %}
-
-    <!-- Lista de Spam -->
-    {% if results.spam_list %}
-    <section class="email-section spam-section">
-        <div class="section-header">
-            <h2>🚫 Spam Detectado ({{ results.spam_list|length }})</h2>
-            <span class="badge badge-warning">Risco Médio</span>
-        </div>
-
-        <div class="email-list">
-            {% for email in results.spam_list %}
-            <div class="email-item spam" data-uid="{{ email.uid }}">
-                <div class="email-checkbox">
-                    <input type="checkbox" class="email-select" value="{{ email.uid }}">
-                </div>
-                <div class="email-content">
-                    <div class="email-header">
-                        <span class="email-from">{{ email.from }}</span>
-                        <span class="email-date">{{ email.date }}</span>
-                    </div>
-                    <div class="email-subject">{{ email.subject }}</div>
-                    <div class="email-reasons">
-                        <span class="score-badge">Score: {{ email.score }}%</span>
-                        {% for reason in email.reasons[:3] %}
-                        <span class="reason-tag">{{ reason }}</span>
-                        {% endfor %}
-                    </div>
-                </div>
-                <div class="email-actions">
-                    <button type="button" class="btn btn-sm btn-danger btn-delete" data-uid="{{ email.uid }}"
-                        title="Excluir">
-                        🗑️
-                    </button>
-                    <button type="button" class="btn btn-sm btn-secondary btn-keep" data-uid="{{ email.uid }}"
-                        title="Manter">
-                        ✓
-                    </button>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-    </section>
-    {% endif %}
-
-    <!-- Mensagem se não houver ameaças -->
-    {% if not results.fraud_list and not results.spam_list %}
-    <div class="empty-state">
-        <div class="empty-icon">🎉</div>
-        <h2>Tudo limpo!</h2>
-        <p>Nenhum e-mail de spam ou fraude foi detectado.</p>
-        <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Voltar ao Dashboard</a>
-    </div>
-    {% endif %}
 </div>
 
 <style>
     .analise-page {
-        max-width: 900px;
+        max-width: 980px;
         margin: 0 auto;
     }
 
-    .page-header {
-        margin-bottom: 2rem;
+    .analysis-control {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1.25rem;
+        padding: 1rem;
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        background: var(--bg-card);
     }
 
-    .page-subtitle {
+    .analysis-status {
         color: var(--text-secondary);
-        font-size: 1rem;
-        margin: 0.5rem 0 0;
+        font-size: 0.9rem;
     }
 
-    /* Summary Cards */
     .summary-cards {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -178,356 +88,195 @@
 
     .summary-card {
         background: var(--bg-card);
-        border-radius: 12px;
-        padding: 1.25rem;
-        display: flex;
-        align-items: center;
-        gap: 1rem;
+        border-radius: 8px;
+        padding: 1.1rem;
         border: 1px solid var(--border-color);
-    }
-
-    .summary-card .card-icon {
-        font-size: 2rem;
-        width: 50px;
-        height: 50px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 10px;
-    }
-
-    .summary-card.total .card-icon {
-        background: rgba(99, 102, 241, 0.15);
-    }
-
-    .summary-card.safe .card-icon {
-        background: rgba(34, 197, 94, 0.15);
-    }
-
-    .summary-card.spam .card-icon {
-        background: rgba(251, 191, 36, 0.15);
-    }
-
-    .summary-card.fraud .card-icon {
-        background: rgba(239, 68, 68, 0.15);
     }
 
     .card-value {
         display: block;
-        font-size: 1.75rem;
+        font-size: 1.65rem;
         font-weight: 700;
         color: var(--text-primary);
     }
 
     .card-label {
         display: block;
-        font-size: 0.8125rem;
+        font-size: 0.82rem;
         color: var(--text-secondary);
     }
 
-    /* Bulk Actions */
-    .bulk-actions {
-        display: flex;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
+    .analysis-results {
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
         padding: 1rem;
         background: var(--bg-card);
-        border-radius: 10px;
-        border: 1px solid var(--border-color);
-    }
-
-    /* Email Sections */
-    .email-section {
-        margin-bottom: 2rem;
     }
 
     .section-header {
         display: flex;
+        justify-content: space-between;
         align-items: center;
         gap: 1rem;
         margin-bottom: 1rem;
     }
 
     .section-header h2 {
-        font-size: 1.125rem;
         margin: 0;
+        font-size: 1.1rem;
     }
 
     .badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 20px;
-        font-size: 0.75rem;
+        padding: 0.25rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.76rem;
         font-weight: 600;
     }
 
-    .badge-danger {
-        background: rgba(239, 68, 68, 0.2);
-        color: #ef4444;
+    .badge-neutral {
+        background: #eef2f7;
+        color: #334155;
     }
 
-    .badge-warning {
-        background: rgba(251, 191, 36, 0.2);
-        color: #fbbf24;
-    }
-
-    /* Email List */
     .email-list {
         display: flex;
         flex-direction: column;
         gap: 0.75rem;
     }
 
-    .email-item {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        padding: 1rem;
-        background: var(--bg-card);
-        border-radius: 10px;
+    .analysis-item {
         border: 1px solid var(--border-color);
-        transition: all 0.2s ease;
+        border-left: 4px solid #94a3b8;
+        border-radius: 8px;
+        padding: 0.85rem;
+        background: #ffffff;
     }
 
-    .email-item:hover {
-        border-color: var(--accent-primary);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    .analysis-item.fraude {
+        border-left-color: #dc2626;
     }
 
-    .email-item.fraud {
-        border-left: 4px solid #ef4444;
+    .analysis-item.suspeito {
+        border-left-color: #d97706;
     }
 
-    .email-item.spam {
-        border-left: 4px solid #fbbf24;
+    .analysis-item.seguro {
+        border-left-color: #16a34a;
     }
 
-    .email-item.removing {
-        opacity: 0.5;
-        transform: translateX(50px);
-    }
-
-    .email-checkbox input {
-        width: 20px;
-        height: 20px;
-        accent-color: var(--accent-primary);
-        cursor: pointer;
-    }
-
-    .email-content {
-        flex: 1;
-        min-width: 0;
-    }
-
-    .email-header {
+    .analysis-item-header {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        margin-bottom: 0.25rem;
+        gap: 1rem;
+        margin-bottom: 0.45rem;
     }
 
-    .email-from {
-        font-weight: 500;
-        color: var(--text-primary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .email-date {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        flex-shrink: 0;
-    }
-
-    .email-subject {
-        color: var(--text-secondary);
-        font-size: 0.9375rem;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        margin-bottom: 0.5rem;
-    }
-
-    .email-reasons {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-    }
-
-    .score-badge {
-        background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-        color: white;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.6875rem;
+    .analysis-subject {
         font-weight: 600;
+        color: var(--text-primary);
     }
 
-    .reason-tag {
-        background: var(--bg-tertiary);
+    .analysis-meta,
+    .analysis-reasons {
         color: var(--text-secondary);
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.6875rem;
+        font-size: 0.84rem;
     }
 
-    .email-actions {
-        display: flex;
-        gap: 0.5rem;
-        flex-shrink: 0;
+    .analysis-reasons {
+        margin-top: 0.45rem;
     }
 
-    .email-actions .btn-sm {
-        width: 36px;
-        height: 36px;
-        padding: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    /* Empty State */
     .empty-state {
         text-align: center;
-        padding: 4rem 2rem;
-        background: var(--bg-card);
-        border-radius: 16px;
-        border: 1px solid var(--border-color);
-    }
-
-    .empty-icon {
-        font-size: 4rem;
-        margin-bottom: 1rem;
-    }
-
-    .empty-state h2 {
-        margin: 0 0 0.5rem;
-    }
-
-    .empty-state p {
+        padding: 3rem 1rem;
         color: var(--text-secondary);
-        margin-bottom: 1.5rem;
     }
 
-    /* Responsive */
     @media (max-width: 768px) {
+        .analysis-control {
+            align-items: stretch;
+            flex-direction: column;
+        }
+
         .summary-cards {
             grid-template-columns: repeat(2, 1fr);
         }
-
-        .email-item {
-            flex-wrap: wrap;
-        }
-
-        .email-actions {
-            width: 100%;
-            justify-content: flex-end;
-            margin-top: 0.5rem;
-        }
     }
 </style>
-{% endblock %}
 
-{% block extra_js %}
 <script>
-    // Selecionar todos
-    document.getElementById('btn-select-all')?.addEventListener('click', function () {
-        const checkboxes = document.querySelectorAll('.email-select');
-        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-        checkboxes.forEach(cb => cb.checked = !allChecked);
-        this.innerHTML = allChecked
-            ? '<span class="btn-icon">☑️</span> Selecionar Todos'
-            : '<span class="btn-icon">☐</span> Desmarcar Todos';
-    });
+    const runButton = document.getElementById('btn-run-analysis');
+    const statusText = document.getElementById('analysis-status');
+    const list = document.getElementById('analysis-results-list');
 
-    // Excluir todos selecionados
-    document.getElementById('btn-delete-all')?.addEventListener('click', async function () {
-        const selected = Array.from(document.querySelectorAll('.email-select:checked')).map(cb => cb.value);
+    const setMetric = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    };
 
-        if (selected.length === 0) {
-            await showAlert('Selecione pelo menos um e-mail para excluir.', 'warning');
+    const escapeHtml = (value) => String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+
+    const renderResults = (items) => {
+        const detected = (items || []).filter(item => item.classification !== 'seguro');
+        if (!detected.length) {
+            list.innerHTML = '<div class="empty-state"><h2>Nenhuma ameaça detectada</h2><p>A análise terminou e não encontrou spam ou fraude.</p></div>';
             return;
         }
 
-        const confirmed = await showConfirm(
-            `Tem certeza que deseja excluir ${selected.length} e-mail(s)?`,
-            { title: 'Confirmar Exclusão', confirmText: 'Excluir', isDanger: true }
-        );
+        list.innerHTML = detected.map(item => {
+            const reasons = (item.reasons || []).slice(0, 4).map(escapeHtml).join(' | ');
+            return `
+                <article class="analysis-item ${escapeHtml(item.classification)}">
+                    <div class="analysis-item-header">
+                        <span class="analysis-subject">${escapeHtml(item.subject || '(Sem assunto)')}</span>
+                        <span>Score ${escapeHtml(item.score)}</span>
+                    </div>
+                    <div class="analysis-meta">
+                        ${escapeHtml(item.from)} · ${escapeHtml(item.classification)} · ${escapeHtml(item.action)}
+                    </div>
+                    <div class="analysis-reasons">${reasons}</div>
+                </article>
+            `;
+        }).join('');
+    };
 
-        if (!confirmed) return;
-
-        this.disabled = true;
-        this.innerHTML = '<span class="btn-icon">⏳</span> Excluindo...';
+    runButton.addEventListener('click', async () => {
+        runButton.disabled = true;
+        statusText.textContent = 'Analisando todos os e-mails da caixa...';
+        list.innerHTML = '<div class="empty-state"><h2>Análise em andamento</h2><p>Isso pode levar alguns minutos em caixas grandes.</p></div>';
 
         try {
-            const response = await fetch('/delete-multiple', {
+            const response = await fetch('{{ url_for("scan_emails") }}', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ uids: selected })
+                headers: { 'Content-Type': 'application/json' }
             });
-            const data = await response.json();
-
-            // Remove itens da lista
-            selected.forEach(uid => {
-                const item = document.querySelector(`.email-item[data-uid="${uid}"]`);
-                if (item) {
-                    item.classList.add('removing');
-                    setTimeout(() => item.remove(), 300);
-                }
-            });
-
-            showToast(`${data.deleted} e-mail(s) excluído(s)!`, 'success');
-
-        } catch (error) {
-            await showAlert('Erro ao excluir: ' + error.message, 'error');
-        }
-
-        this.disabled = false;
-        this.innerHTML = '<span class="btn-icon">🗑️</span> Excluir Todos Selecionados';
-    });
-
-    // Excluir individual
-    document.querySelectorAll('.btn-delete').forEach(btn => {
-        btn.addEventListener('click', async function () {
-            const uid = this.dataset.uid;
-            const item = this.closest('.email-item');
-
-            this.disabled = true;
-            this.innerHTML = '⏳';
-
-            try {
-                const response = await fetch('/delete-email', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ uid: uid })
-                });
-                const data = await response.json();
-
-                if (data.success) {
-                    item.classList.add('removing');
-                    setTimeout(() => item.remove(), 300);
-                    showToast('E-mail excluído!', 'success');
-                } else {
-                    await showAlert('Erro: ' + data.error, 'error');
-                }
-
-            } catch (error) {
-                await showAlert('Erro: ' + error.message, 'error');
+            if (!response.ok) {
+                throw new Error('Falha ao executar análise');
             }
+            const data = await response.json();
+            const scanned = data.total_scanned || 0;
+            const spam = data.spam_found || 0;
+            const fraud = data.fraud_found || 0;
+            const actions = (data.deleted || 0) + (data.quarantined || 0) + (data.would_delete || 0) + (data.would_quarantine || 0);
 
-            this.disabled = false;
-            this.innerHTML = '🗑️';
-        });
-    });
-
-    // Manter (remover da lista sem excluir)
-    document.querySelectorAll('.btn-keep').forEach(btn => {
-        btn.addEventListener('click', function () {
-            const item = this.closest('.email-item');
-            item.classList.add('removing');
-            setTimeout(() => item.remove(), 300);
-            showToast('E-mail mantido na caixa de entrada.', 'info');
-        });
+            setMetric('metric-scanned', scanned);
+            setMetric('metric-safe', Math.max(scanned - spam - fraud, 0));
+            setMetric('metric-spam', spam);
+            setMetric('metric-fraud', fraud);
+            setMetric('metric-actions', `${actions} ações`);
+            statusText.textContent = `Análise concluída: ${scanned} e-mails processados.`;
+            renderResults(data.items || []);
+        } catch (error) {
+            statusText.textContent = error.message || 'Erro ao executar análise.';
+            list.innerHTML = '<div class="empty-state"><h2>Erro na análise</h2><p>Verifique a conexão IMAP e tente novamente.</p></div>';
+        } finally {
+            runButton.disabled = false;
+        }
     });
 </script>
 {% endblock %}

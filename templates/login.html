@@ -8,19 +8,48 @@
     <meta name="description" content="Faça login para acessar o organizador de e-mails">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 
 <body class="dark-theme login-page">
-    <div class="login-container">
+    <div class="login-shell">
+        <section class="login-hero-panel" aria-label="Resumo do sistema">
+            <a href="{{ url_for('login') }}" class="login-brand">
+                <span class="login-brand-mark">EO</span>
+                <span>Email Organizer</span>
+            </a>
+            <div class="login-hero-copy">
+                <p class="login-kicker">Segurança para caixas IMAP</p>
+                <h1>Analise, registre e remova ameaças com rastreabilidade.</h1>
+                <p>
+                    O sistema classifica mensagens por risco, registra cada decisão e mantém o controle da caixa sem
+                    transformar automação em uma caixa-preta.
+                </p>
+            </div>
+            <div class="login-metrics">
+                <div>
+                    <strong>03:00</strong>
+                    <span>varredura diária</span>
+                </div>
+                <div>
+                    <strong>100%</strong>
+                    <span>caixa analisada</span>
+                </div>
+                <div>
+                    <strong>JSONL</strong>
+                    <span>logs auditáveis</span>
+                </div>
+            </div>
+        </section>
+
         <div class="login-card">
             <div class="login-header">
                 <div class="login-logo">
-                    <span class="logo-icon">📧</span>
+                    <span class="logo-icon">EO</span>
                 </div>
-                <h1>Email Organizer</h1>
-                <p class="login-subtitle">Organize seus e-mails de forma inteligente</p>
+                <h1>Acessar caixa</h1>
+                <p class="login-subtitle">Use as credenciais da conta de e-mail para autenticar via IMAP/SMTP.</p>
             </div>
 
             {% with messages = get_flashed_messages(with_categories=true) %}
@@ -37,7 +66,7 @@
                 <div class="form-group">
                     <label for="email">E-mail</label>
                     <div class="input-wrapper">
-                        <span class="input-icon">📨</span>
+                        <span class="input-icon">@</span>
                         <input type="email" id="email" name="email" placeholder="Digite seu e-mail corporativo" required
                             autocomplete="email" autofocus value="{{ default_email or '' }}">
                     </div>
@@ -46,7 +75,7 @@
                 <div class="form-group">
                     <label for="password">Senha do e-mail</label>
                     <div class="input-wrapper">
-                        <span class="input-icon">🔒</span>
+                        <span class="input-icon">••</span>
                         <input type="password" id="password" name="password" placeholder="Digite a senha da conta de e-mail" required
                             autocomplete="current-password">
                     </div>
@@ -54,35 +83,13 @@
 
                 <button type="submit" class="btn btn-primary btn-block">
                     <span class="btn-text">Entrar</span>
-                    <span class="btn-icon">→</span>
+                    <span class="btn-icon">›</span>
                 </button>
             </form>
 
             <div class="login-footer">
-                <p class="security-note">
-                    🔐 Conexão segura SSL/TLS
-                </p>
-                <p class="privacy-note">
-                    As credenciais são usadas para autenticação IMAP/SMTP da sua conta de e-mail.
-                </p>
-            </div>
-        </div>
-
-        <div class="login-features">
-            <div class="feature">
-                <span class="feature-icon">🛡️</span>
-                <h3>Detecção de Spam</h3>
-                <p>Identifica e-mails indesejados automaticamente</p>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">⚠️</span>
-                <h3>Proteção contra Fraude</h3>
-                <p>Detecta tentativas de phishing e golpes</p>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">📁</span>
-                <h3>Organização Automática</h3>
-                <p>Categoriza e-mails em pastas inteligentes</p>
+                <p class="security-note">Conexão SSL/TLS com o servidor de e-mail</p>
+                <p class="privacy-note">As credenciais são usadas somente para autenticação da caixa.</p>
             </div>
         </div>
     </div>

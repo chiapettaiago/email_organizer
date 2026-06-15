@@ -12,10 +12,10 @@ from functools import wraps
 from threading import RLock
 from markupsafe import Markup
 from email_service.connection import EmailConnection
-from email_service.spam_detector import SpamDetector
 from email_service.folder_manager import FolderManager
 from apscheduler.schedulers.background import BackgroundScheduler
-from config import LOCAWEB_CONFIG
+from apscheduler.schedulers.base import SchedulerNotRunningError
+from config import FRAUD_RISK_CONFIG, LOCAWEB_CONFIG
 from database import create_user, get_all_users, delete_user, toggle_user_status
 import secrets
 import atexit
@@ -25,10 +25,10 @@ app.secret_key = secrets.token_hex(32)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = int(os.getenv('STATIC_CACHE_TTL_SECONDS', '3600'))
 
 # Configurações Locaweb
-LOCAWEB_IMAP_SERVER = 'email-ssl.com.br'
-LOCAWEB_IMAP_PORT = 993
-LOCAWEB_SMTP_SERVER = 'email-ssl.com.br'
-LOCAWEB_SMTP_PORT = 465
+LOCAWEB_IMAP_SERVER = LOCAWEB_CONFIG['IMAP_SERVER']
+LOCAWEB_IMAP_PORT = LOCAWEB_CONFIG['IMAP_PORT']
+LOCAWEB_SMTP_SERVER = LOCAWEB_CONFIG['SMTP_SERVER']
+LOCAWEB_SMTP_PORT = LOCAWEB_CONFIG['SMTP_PORT']
 
 # Arquivo de configurações persistentes
 CONFIG_FILE = os.getenv(
@@ -44,7 +44,14 @@ scheduler = BackgroundScheduler()
 scheduler.start()
 
 # Registra para encerrar o scheduler quando a aplicação parar
-atexit.register(lambda: scheduler.shutdown())
+def shutdown_scheduler():
+    try:
+        scheduler.shutdown()
+    except SchedulerNotRunningError:
+        pass
+
+
+atexit.register(shutdown_scheduler)
 
 
 def _default_config():
@@ -54,8 +61,9 @@ def _default_config():
         'auto_delete_fraud': True,
         'spam_threshold': 70,
         'auto_scan_enabled': True,
-        'auto_scan_time': '12:00',
+        'auto_scan_time': '03:00',
         'last_scan': None,
+        'fraud_risk': dict(FRAUD_RISK_CONFIG),
         'accounts': {}
     }
 
@@ -67,7 +75,118 @@ def _merge_config(config_data):
         merged.update(config_data)
     if not isinstance(merged.get('accounts'), dict):
         merged['accounts'] = {}
+    if not isinstance(merged.get('fraud_risk'), dict):
+        merged['fraud_risk'] = {}
+    fraud_risk = dict(FRAUD_RISK_CONFIG)
+    fraud_risk.update(merged.get('fraud_risk', {}))
+    merged['fraud_risk'] = fraud_risk
     return merged
+
+
+def get_risk_config(config=None):
+    """Obtém configuração normalizada do motor de risco."""
+    loaded = config or load_config()
+    risk_config = dict(FRAUD_RISK_CONFIG)
+    risk_config.update(loaded.get('fraud_risk', {}))
+    # Compatibilidade com o controle antigo de threshold.
+    risk_config['quarantine_threshold'] = int(loaded.get('spam_threshold', risk_config['quarantine_threshold']))
+    if loaded.get('auto_delete_spam', True):
+        risk_config['delete_threshold'] = risk_config['quarantine_threshold']
+    if not loaded.get('auto_delete_fraud', True):
+        risk_config['delete_threshold'] = 101
+    if loaded.get('auto_delete_spam', True) or loaded.get('auto_delete_fraud', True):
+        risk_config['dry_run'] = False
+    return risk_config
+
+
+def format_log_timestamp(value):
+    """Formata timestamps ISO para leitura humana na UI."""
+    if not value:
+        return ''
+    try:
+        normalized = str(value).replace('Z', '+00:00')
+        parsed = datetime.fromisoformat(normalized)
+        return parsed.strftime('%d/%m/%Y %H:%M:%S')
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def load_risk_logs(limit=500):
+    """Carrega decisões de risco registradas em JSONL."""
+    risk_config = get_risk_config()
+    log_file = risk_config.get('log_file') or 'logs/fraud_decisions.jsonl'
+    logs = []
+
+    if not os.path.exists(log_file):
+        return logs
+
+    try:
+        with open(log_file, 'r', encoding='utf-8') as log_handle:
+            lines = log_handle.readlines()
+    except OSError:
+        return logs
+
+    current_email = session.get('email', '').strip().lower()
+    is_admin = session.get('is_admin', False)
+
+    for raw_line in reversed(lines):
+        if len(logs) >= limit:
+            break
+        try:
+            entry = json.loads(raw_line)
+        except (TypeError, ValueError):
+            continue
+
+        account = str(entry.get('account', '')).strip().lower()
+        if current_email and not is_admin and account != current_email:
+            continue
+
+        logs.append({
+            'timestamp': entry.get('timestamp', ''),
+            'timestamp_display': format_log_timestamp(entry.get('timestamp', '')),
+            'event': entry.get('event', 'action'),
+            'account': entry.get('account', ''),
+            'uid': entry.get('uid', ''),
+            'from': entry.get('from', ''),
+            'subject': entry.get('subject', ''),
+            'score': entry.get('score', 0),
+            'classification': entry.get('classification', ''),
+            'rules': entry.get('rules', []),
+            'action': entry.get('action', ''),
+            'success': entry.get('success', False),
+            'error': entry.get('error', ''),
+        })
+
+    return logs
+
+
+def write_system_log(entry):
+    """Registra eventos manuais no mesmo log de auditoria do motor de risco."""
+    risk_config = get_risk_config()
+    log_file = risk_config.get('log_file') or 'logs/fraud_decisions.jsonl'
+    log_dir = os.path.dirname(log_file)
+    payload = {
+        'timestamp': datetime.now().isoformat(),
+        'event': entry.get('event', 'action'),
+        'account': entry.get('account', session.get('email', '')),
+        'uid': entry.get('uid', ''),
+        'from': entry.get('from', ''),
+        'subject': entry.get('subject', ''),
+        'score': entry.get('score', 0),
+        'classification': entry.get('classification', 'manual'),
+        'rules': entry.get('rules', []),
+        'action': entry.get('action', ''),
+        'success': entry.get('success', True),
+        'error': entry.get('error', ''),
+    }
+
+    try:
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        with open(log_file, 'a', encoding='utf-8') as log_handle:
+            log_handle.write(json.dumps(payload, ensure_ascii=False) + '\n')
+    except OSError as exc:
+        print(f"Erro ao registrar log do sistema: {exc}")
 
 
 def load_config():
@@ -305,50 +424,40 @@ def scheduled_scan():
     print(f"[{datetime.now()}] 🔍 Iniciando análise agendada de e-mails...")
     
     # Processa cada conta salva
-    for email, account_data in config.get('accounts', {}).items():
+    for account_key, account_data in config.get('accounts', {}).items():
+        email_address = account_key
         try:
+            if not isinstance(account_data, dict):
+                continue
+            email_address = account_data.get('email') or account_key
             password = account_data.get('password', '')
             if not password:
                 continue
             
             conn = EmailConnection(
-                email, password,
+                email_address, password,
                 LOCAWEB_IMAP_SERVER, LOCAWEB_IMAP_PORT,
                 LOCAWEB_SMTP_SERVER, LOCAWEB_SMTP_PORT
             )
             
             if conn.connect():
-                detector = SpamDetector(threshold=config.get('spam_threshold', 70))
-                folder_manager = FolderManager(conn)
+                folder_manager = FolderManager(conn, risk_config=get_risk_config(config))
                 
                 # Garante que as pastas existem
                 folder_manager.ensure_default_folders()
-                
-                # Busca e analisa e-mails
-                emails_list = conn.fetch_emails('INBOX', limit=200, include_body=True)
-                spam_count = 0
-                fraud_count = 0
-                to_delete = []
-
-                for email_data in emails_list:
-                    analysis = detector.analyze(email_data)
-                    uid = email_data.get('uid', email_data.get('id', ''))
-                    
-                    if analysis['is_fraud'] and config.get('auto_delete_fraud', True):
-                        to_delete.append(uid)
-                        fraud_count += 1
-                    elif analysis['is_spam'] and config.get('auto_delete_spam', True):
-                        to_delete.append(uid)
-                        spam_count += 1
-
-                if to_delete:
-                    conn.move_to_trash_bulk(to_delete, 'INBOX')
+                folder_manager.ensure_quarantine_folder()
+                scan_results = folder_manager.process_inbox_risk(limit=None)
                 
                 conn.disconnect()
-                print(f"[{datetime.now()}] ✅ {email}: {spam_count} spam, {fraud_count} fraudes excluídos")
+                print(
+                    f"[{datetime.now()}] ✅ {email_address}: "
+                    f"{scan_results['suspect']} suspeitos, {scan_results['fraud']} fraudes, "
+                    f"{scan_results['quarantined']} quarentena, {scan_results['deleted']} exclusões, "
+                    f"{scan_results['would_quarantine']} quarentenas simuladas, {scan_results['would_delete']} exclusões simuladas"
+                )
         
         except Exception as e:
-            print(f"[{datetime.now()}] ❌ Erro ao processar {email}: {e}")
+            print(f"[{datetime.now()}] ❌ Erro ao processar {email_address}: {e}")
     
     # Atualiza última execução
     config['last_scan'] = datetime.now().isoformat()
@@ -356,7 +465,7 @@ def scheduled_scan():
 
 
 def setup_scheduler():
-    """Configura o scheduler para executar ao meio dia"""
+    """Configura o scheduler para executar diariamente."""
     config = load_config()
     
     # Remove job anterior se existir
@@ -364,14 +473,14 @@ def setup_scheduler():
         scheduler.remove_job('daily_scan')
     
     if config.get('auto_scan_enabled', True):
-        scan_time = config.get('auto_scan_time', '12:00')
+        scan_time = config.get('auto_scan_time', '03:00')
         try:
             hour, minute = map(int, scan_time.split(':', 1))
             if not (0 <= hour <= 23 and 0 <= minute <= 59):
                 raise ValueError
         except ValueError:
-            hour, minute = 12, 0
-            scan_time = '12:00'
+            hour, minute = 3, 0
+            scan_time = '03:00'
 
         scheduler.add_job(
             scheduled_scan,
@@ -426,10 +535,11 @@ def login():
     default_email = LOCAWEB_CONFIG.get('DEFAULT_EMAIL', 'contato@isna.org.br')
     
     if request.method == 'POST':
-        email_address = request.form.get('email', '').strip().lower()
+        email_address = request.form.get('email', '').strip()
+        account_key = email_address.lower()
         password = request.form.get('password', '')
         
-        print(f"[LOGIN] Tentativa para: {email_address}")
+        print(f"[LOGIN] Tentativa para: {email_address} em {LOCAWEB_IMAP_SERVER}:{LOCAWEB_IMAP_PORT}")
         
         if not email_address or not password:
             flash('Por favor, preencha e-mail e senha.', 'error')
@@ -453,8 +563,9 @@ def login():
             # Mantém conta salva para automações agendadas
             config = load_config()
             accounts = config.get('accounts', {})
-            accounts[email_address] = {
+            accounts[account_key] = {
                 'password': password,
+                'email': email_address,
                 'last_login': datetime.now().isoformat()
             }
             config['accounts'] = accounts
@@ -464,8 +575,9 @@ def login():
             flash(f'Bem-vindo, {email_address}!', 'success')
             return redirect(url_for('emails'))
         
-        print("[LOGIN] Falha: e-mail ou senha inválidos")
-        flash('Falha na autenticação do e-mail. Verifique as credenciais.', 'error')
+        error_message = conn.last_error or 'Falha na autenticação do e-mail. Verifique as credenciais.'
+        print(f"[LOGIN] Falha: {error_message}")
+        flash(error_message, 'error')
     
     return render_template('login.html', default_email=default_email)
 
@@ -617,54 +729,30 @@ def scan_emails():
     """Analisa e-mails para detectar spam e fraude"""
     conn = get_email_connection()
     config = load_config()
-    detector = SpamDetector(threshold=config.get('spam_threshold', 70))
-    results = {'total_scanned': 0, 'spam_found': 0, 'fraud_found': 0, 'deleted': 0, 'items': []}
+    results = {
+        'total_scanned': 0,
+        'spam_found': 0,
+        'fraud_found': 0,
+        'deleted': 0,
+        'quarantined': 0,
+        'would_delete': 0,
+        'would_quarantine': 0,
+        'items': []
+    }
     
     if conn and conn.connect():
-        emails_list = conn.fetch_emails('INBOX', limit=100, include_body=True)
-        results['total_scanned'] = len(emails_list)
-        to_delete = []
-        
-        for email_data in emails_list:
-            analysis = detector.analyze(email_data)
-            if analysis['is_spam'] or analysis['is_fraud']:
-                uid = email_data.get('uid', email_data.get('id', ''))
-                
-                results['items'].append({
-                    'uid': uid,
-                    'subject': email_data['subject'],
-                    'from': email_data['from'],
-                    'is_spam': analysis['is_spam'],
-                    'is_fraud': analysis['is_fraud'],
-                    'score': analysis['score'],
-                    'reasons': analysis['reasons']
-                })
-                
-                if analysis['is_spam']:
-                    results['spam_found'] += 1
-                if analysis['is_fraud']:
-                    results['fraud_found'] += 1
-                
-                # Auto-delete se configurado
-                should_delete = False
-                if analysis['is_fraud'] and config.get('auto_delete_fraud', True):
-                    should_delete = True
-                elif analysis['is_spam'] and config.get('auto_delete_spam', True):
-                    should_delete = True
-                
-                if should_delete:
-                    to_delete.append(uid)
-
-        if to_delete:
-            if conn.move_to_trash_bulk(to_delete, 'INBOX'):
-                results['deleted'] = len(to_delete)
-            else:
-                for uid in to_delete:
-                    try:
-                        if conn.move_to_trash(uid, 'INBOX'):
-                            results['deleted'] += 1
-                    except Exception:
-                        pass
+        folder_manager = FolderManager(conn, risk_config=get_risk_config(config))
+        folder_manager.ensure_default_folders()
+        folder_manager.ensure_quarantine_folder()
+        scan_results = folder_manager.process_inbox_risk(limit=None)
+        results['total_scanned'] = scan_results['scanned']
+        results['spam_found'] = scan_results['suspect']
+        results['fraud_found'] = scan_results['fraud']
+        results['deleted'] = scan_results['deleted']
+        results['quarantined'] = scan_results['quarantined']
+        results['would_delete'] = scan_results['would_delete']
+        results['would_quarantine'] = scan_results['would_quarantine']
+        results['items'] = scan_results['items']
         
         conn.disconnect()
         
@@ -680,12 +768,13 @@ def scan_emails():
 def organize_emails():
     """Organiza e-mails automaticamente em pastas"""
     conn = get_email_connection()
-    folder_manager = FolderManager(conn)
     results = {'moved': 0, 'errors': []}
     
     if conn and conn.connect():
         # Garante que as pastas padrão existem
+        folder_manager = FolderManager(conn, risk_config=get_risk_config())
         folder_manager.ensure_default_folders()
+        folder_manager.ensure_quarantine_folder()
         
         # Organiza e-mails
         results = folder_manager.auto_organize()
@@ -706,18 +795,46 @@ def delete_spam():
     
     if conn and conn.connect():
         if not uids:
-            folder_manager = FolderManager(conn)
+            folder_manager = FolderManager(conn, risk_config=get_risk_config())
             results = folder_manager.delete_spam_and_fraud(permanent=False)
         else:
             if conn.move_to_trash_bulk(uids, source_folder):
                 results['deleted'] = len(uids)
+                for uid in uids:
+                    write_system_log({
+                        'event': 'action',
+                        'uid': uid,
+                        'classification': 'manual',
+                        'rules': ['Exclusão manual de spam/fraude'],
+                        'action': 'delete',
+                        'success': True,
+                    })
             else:
                 for uid in uids:
                     try:
-                        conn.move_to_trash(uid, source_folder)
-                        results['deleted'] += 1
+                        ok = conn.move_to_trash(uid, source_folder)
+                        if ok:
+                            results['deleted'] += 1
+                        write_system_log({
+                            'event': 'action',
+                            'uid': uid,
+                            'classification': 'manual',
+                            'rules': ['Exclusão manual de spam/fraude'],
+                            'action': 'delete',
+                            'success': ok,
+                            'error': '' if ok else 'Falha ao mover para lixeira',
+                        })
                     except Exception as e:
                         results['errors'].append(str(e))
+                        write_system_log({
+                            'event': 'action',
+                            'uid': uid,
+                            'classification': 'manual',
+                            'rules': ['Exclusão manual de spam/fraude'],
+                            'action': 'delete',
+                            'success': False,
+                            'error': str(e),
+                        })
         conn.disconnect()
     
     return jsonify(results)
@@ -765,6 +882,16 @@ def email_action():
 
     if bulk_ok:
         results['processed'] = len(uids)
+        if action == 'delete':
+            for uid in uids:
+                write_system_log({
+                    'event': 'action',
+                    'uid': uid,
+                    'classification': 'manual',
+                    'rules': ['Exclusão manual em lote'],
+                    'action': 'delete',
+                    'success': True,
+                })
         conn.disconnect()
         return jsonify(results)
 
@@ -788,8 +915,27 @@ def email_action():
 
         if ok:
             results['processed'] += 1
+            if action == 'delete':
+                write_system_log({
+                    'event': 'action',
+                    'uid': uid,
+                    'classification': 'manual',
+                    'rules': ['Exclusão manual'],
+                    'action': 'delete',
+                    'success': True,
+                })
         else:
             results['errors'].append(f'{uid}: falha ao executar ação')
+            if action == 'delete':
+                write_system_log({
+                    'event': 'action',
+                    'uid': uid,
+                    'classification': 'manual',
+                    'rules': ['Exclusão manual'],
+                    'action': 'delete',
+                    'success': False,
+                    'error': 'Falha ao executar ação',
+                })
 
     conn.disconnect()
     return jsonify(results)
@@ -867,6 +1013,18 @@ def folders():
     return render_template('folders.html', folders=folders_list, email=session.get('email'))
 
 
+@app.route('/logs')
+@login_required
+def system_logs():
+    """Página de auditoria das decisões de risco."""
+    logs = load_risk_logs(limit=500)
+    return render_template(
+        'logs.html',
+        logs=logs,
+        email=session.get('email')
+    )
+
+
 @app.route('/settings', methods=['GET', 'POST'])
 @login_required
 def settings():
@@ -879,7 +1037,7 @@ def settings():
         config['auto_delete_fraud'] = request.form.get('auto_delete_fraud') == 'on'
         config['spam_threshold'] = int(request.form.get('spam_threshold', 70))
         config['auto_scan_enabled'] = request.form.get('auto_scan_enabled') == 'on'
-        config['auto_scan_time'] = request.form.get('auto_scan_time', '12:00')
+        config['auto_scan_time'] = request.form.get('auto_scan_time', '03:00')
         
         save_config(config)
         
@@ -903,40 +1061,34 @@ def settings():
 @app.route('/run-scan-now', methods=['POST'])
 @login_required
 def run_scan_now():
-    """Executa análise manual imediatamente - auto-exclui spam/fraude"""
+    """Executa análise manual imediatamente com política segura de risco."""
     config = load_config()
     conn = get_email_connection()
-    detector = SpamDetector(threshold=config.get('spam_threshold', 70))
     
-    results = {'scanned': 0, 'spam': 0, 'fraud': 0, 'deleted': 0}
+    results = {
+        'scanned': 0,
+        'spam': 0,
+        'fraud': 0,
+        'quarantined': 0,
+        'deleted': 0,
+        'would_quarantine': 0,
+        'would_delete': 0,
+        'dry_run': True
+    }
     
     if conn and conn.connect():
-        emails_list = conn.fetch_emails('INBOX', limit=200, include_body=True)
-        results['scanned'] = len(emails_list)
-        to_delete = []
-        
-        for email_data in emails_list:
-            analysis = detector.analyze(email_data)
-            uid = email_data.get('uid', email_data.get('id', ''))
-            
-            # Auto-exclui spam e fraude imediatamente
-            if analysis['is_fraud']:
-                results['fraud'] += 1
-                to_delete.append(uid)
-            elif analysis['is_spam']:
-                results['spam'] += 1
-                to_delete.append(uid)
-
-        if to_delete:
-            if conn.move_to_trash_bulk(to_delete, 'INBOX'):
-                results['deleted'] = len(to_delete)
-            else:
-                for uid in to_delete:
-                    try:
-                        if conn.move_to_trash(uid, 'INBOX'):
-                            results['deleted'] += 1
-                    except Exception:
-                        pass
+        folder_manager = FolderManager(conn, risk_config=get_risk_config(config))
+        folder_manager.ensure_default_folders()
+        folder_manager.ensure_quarantine_folder()
+        scan_results = folder_manager.process_inbox_risk(limit=None)
+        results['scanned'] = scan_results['scanned']
+        results['spam'] = scan_results['suspect']
+        results['fraud'] = scan_results['fraud']
+        results['quarantined'] = scan_results['quarantined']
+        results['deleted'] = scan_results['deleted']
+        results['would_quarantine'] = scan_results['would_quarantine']
+        results['would_delete'] = scan_results['would_delete']
+        results['dry_run'] = scan_results['dry_run']
         
         conn.disconnect()
         
@@ -949,49 +1101,14 @@ def run_scan_now():
 @app.route('/analise')
 @login_required
 def analise_interativa():
-    """Página de análise interativa - mostra resultados para revisão"""
-    conn = get_email_connection()
-    config = load_config()
-    detector = SpamDetector(threshold=config.get('spam_threshold', 70))
-    
+    """Página de análise interativa. A análise só roda após clique do usuário."""
     results = {
         'total_scanned': 0,
         'spam_list': [],
         'fraud_list': [],
         'safe_count': 0
     }
-    
-    if conn and conn.connect():
-        emails_list = conn.fetch_emails('INBOX', limit=100, include_body=True)
-        results['total_scanned'] = len(emails_list)
-        
-        for email_data in emails_list:
-            analysis = detector.analyze(email_data)
-            uid = email_data.get('uid', email_data.get('id', ''))
-            
-            if analysis['is_fraud']:
-                results['fraud_list'].append({
-                    'uid': uid,
-                    'subject': email_data.get('subject', 'Sem assunto'),
-                    'from': email_data.get('from', 'Desconhecido'),
-                    'date': email_data.get('date', ''),
-                    'score': analysis['score'],
-                    'reasons': analysis['reasons']
-                })
-            elif analysis['is_spam']:
-                results['spam_list'].append({
-                    'uid': uid,
-                    'subject': email_data.get('subject', 'Sem assunto'),
-                    'from': email_data.get('from', 'Desconhecido'),
-                    'date': email_data.get('date', ''),
-                    'score': analysis['score'],
-                    'reasons': analysis['reasons']
-                })
-            else:
-                results['safe_count'] += 1
-        
-        conn.disconnect()
-    
+
     return render_template('analise.html',
                           email=session.get('email'),
                           results=results)
@@ -1011,11 +1128,29 @@ def delete_email():
     
     if conn and conn.connect():
         try:
-            conn.move_to_trash(uid, folder)
+            ok = conn.move_to_trash(uid, folder)
             conn.disconnect()
-            return jsonify({'success': True})
+            write_system_log({
+                'event': 'action',
+                'uid': uid,
+                'classification': 'manual',
+                'rules': ['Exclusão manual individual'],
+                'action': 'delete',
+                'success': ok,
+                'error': '' if ok else 'Falha ao mover para lixeira',
+            })
+            return jsonify({'success': ok})
         except Exception as e:
             conn.disconnect()
+            write_system_log({
+                'event': 'action',
+                'uid': uid,
+                'classification': 'manual',
+                'rules': ['Exclusão manual individual'],
+                'action': 'delete',
+                'success': False,
+                'error': str(e),
+            })
             return jsonify({'success': False, 'error': str(e)})
     
     return jsonify({'success': False, 'error': 'Não foi possível conectar'})
@@ -1035,13 +1170,41 @@ def delete_multiple():
     if conn and conn.connect():
         if conn.move_to_trash_bulk(uids, folder):
             results['deleted'] = len(uids)
+            for uid in uids:
+                write_system_log({
+                    'event': 'action',
+                    'uid': uid,
+                    'classification': 'manual',
+                    'rules': ['Exclusão manual múltipla'],
+                    'action': 'delete',
+                    'success': True,
+                })
         else:
             for uid in uids:
                 try:
-                    conn.move_to_trash(uid, folder)
-                    results['deleted'] += 1
-                except Exception:
+                    ok = conn.move_to_trash(uid, folder)
+                    if ok:
+                        results['deleted'] += 1
+                    write_system_log({
+                        'event': 'action',
+                        'uid': uid,
+                        'classification': 'manual',
+                        'rules': ['Exclusão manual múltipla'],
+                        'action': 'delete',
+                        'success': ok,
+                        'error': '' if ok else 'Falha ao mover para lixeira',
+                    })
+                except Exception as exc:
                     results['errors'] += 1
+                    write_system_log({
+                        'event': 'action',
+                        'uid': uid,
+                        'classification': 'manual',
+                        'rules': ['Exclusão manual múltipla'],
+                        'action': 'delete',
+                        'success': False,
+                        'error': str(exc),
+                    })
         conn.disconnect()
     
     return jsonify(results)

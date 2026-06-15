@@ -1,17 +1,21 @@
 # Gerenciador de Pastas de E-mail
 # ================================
 
+import json
+import os
+from datetime import datetime
 from typing import Dict, List, Optional
-from config import DEFAULT_FOLDERS, ORGANIZATION_RULES
+from config import DEFAULT_FOLDERS, FRAUD_RISK_CONFIG, ORGANIZATION_RULES
 from email_service.spam_detector import SpamDetector
 
 
 class FolderManager:
     """Gerencia pastas e organização automática de e-mails"""
     
-    def __init__(self, email_connection):
+    def __init__(self, email_connection, risk_config: Optional[Dict] = None):
         self.conn = email_connection
-        self.spam_detector = SpamDetector()
+        self.risk_config = self._merge_risk_config(risk_config or {})
+        self.spam_detector = SpamDetector(risk_config=self.risk_config)
     
     def ensure_default_folders(self) -> Dict:
         """Cria pastas padrão se não existirem"""
@@ -32,6 +36,179 @@ class FolderManager:
                     results['errors'].append(folder)
         
         return results
+
+    def _merge_risk_config(self, risk_config: Dict) -> Dict:
+        merged = dict(FRAUD_RISK_CONFIG)
+        if isinstance(risk_config, dict):
+            merged.update({key: value for key, value in risk_config.items() if value is not None})
+        return merged
+
+    def ensure_quarantine_folder(self) -> bool:
+        """Garante a pasta de quarentena, criando pai/filho quando o IMAP exigir."""
+        quarantine_folder = self.risk_config.get('quarantine_folder', 'Quarentena/Fraude')
+        if not self.conn or not self.conn.imap_conn:
+            return False
+
+        existing = set(self.conn.list_folders())
+        if quarantine_folder in existing:
+            return True
+
+        parts = [part for part in quarantine_folder.split('/') if part]
+        current = ''
+        for part in parts:
+            current = part if not current else f'{current}/{part}'
+            if current not in existing:
+                self.conn.create_folder(current)
+                existing = set(self.conn.list_folders(force_refresh=True))
+
+        return quarantine_folder in existing
+
+    def apply_risk_action(self, email_data: Dict, analysis: Dict, source_folder: str = 'INBOX') -> Dict:
+        """Executa keep/quarentena/delete de forma rastreável e respeitando dry-run."""
+        uid = email_data.get('uid', email_data.get('id', ''))
+        score = int(analysis.get('score', 0))
+        action = self.spam_detector.recommended_action(score)
+        dry_run = bool(self.risk_config.get('dry_run', True))
+        quarantine_enabled = bool(self.risk_config.get('quarantine_enabled', True))
+        quarantine_folder = self.risk_config.get('quarantine_folder', 'Quarentena/Fraude')
+        success = True
+        error = ''
+
+        if action == 'quarantine' and not quarantine_enabled:
+            action = 'keep'
+
+        if not dry_run and uid:
+            try:
+                if action == 'delete':
+                    # Exclusão automática ainda passa pela lixeira do servidor.
+                    success = self.conn.move_to_trash(uid, source_folder)
+                elif action == 'quarantine':
+                    self.ensure_quarantine_folder()
+                    success = self.conn.move_email(uid, source_folder, quarantine_folder)
+            except Exception as exc:
+                success = False
+                error = str(exc)
+
+        if dry_run and action in {'delete', 'quarantine'}:
+            logged_action = f'dry-run:{action}'
+        else:
+            logged_action = action
+
+        decision = {
+            'timestamp': datetime.now().isoformat(),
+            'event': 'action',
+            'account': getattr(self.conn, 'email_address', ''),
+            'uid': uid,
+            'from': email_data.get('from', ''),
+            'subject': email_data.get('subject', ''),
+            'score': score,
+            'classification': analysis.get('classification', ''),
+            'rules': analysis.get('rules', analysis.get('reasons', [])),
+            'action': logged_action,
+            'success': success,
+            'error': error,
+        }
+        self.log_risk_decision(decision)
+        return decision
+
+    def log_analysis_event(self, event: str, email_data: Dict, analysis: Dict, extra: Optional[Dict] = None):
+        """Registra etapas de análise e detecção além da ação tomada."""
+        entry = {
+            'timestamp': datetime.now().isoformat(),
+            'event': event,
+            'account': getattr(self.conn, 'email_address', ''),
+            'uid': email_data.get('uid', email_data.get('id', '')),
+            'from': email_data.get('from', ''),
+            'subject': email_data.get('subject', ''),
+            'score': int(analysis.get('score', 0)),
+            'classification': analysis.get('classification', ''),
+            'rules': analysis.get('rules', analysis.get('reasons', [])),
+            'action': extra.get('action', '') if isinstance(extra, dict) else '',
+            'success': extra.get('success', True) if isinstance(extra, dict) else True,
+            'error': extra.get('error', '') if isinstance(extra, dict) else '',
+        }
+        self.log_risk_decision(entry)
+
+    def log_risk_decision(self, decision: Dict):
+        """Registra decisão em JSONL para auditoria e resposta a incidentes."""
+        log_file = self.risk_config.get('log_file') or 'logs/fraud_decisions.jsonl'
+        log_dir = os.path.dirname(log_file)
+        try:
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            with open(log_file, 'a', encoding='utf-8') as log_handle:
+                log_handle.write(json.dumps(decision, ensure_ascii=False) + '\n')
+        except OSError as exc:
+            print(f"Erro ao registrar decisão de risco: {exc}")
+
+    def process_inbox_risk(self, limit: Optional[int] = None) -> Dict:
+        """Analisa a INBOX e aplica a política de risco configurada."""
+        results = {
+            'scanned': 0,
+            'safe': 0,
+            'suspect': 0,
+            'fraud': 0,
+            'kept': 0,
+            'quarantined': 0,
+            'deleted': 0,
+            'would_quarantine': 0,
+            'would_delete': 0,
+            'dry_run': bool(self.risk_config.get('dry_run', True)),
+            'items': [],
+            'errors': []
+        }
+
+        if not self.conn or not self.conn.imap_conn:
+            return results
+
+        emails = self.conn.fetch_emails('INBOX', limit=limit, include_body=True)
+        results['scanned'] = len(emails)
+
+        for email_data in emails:
+            try:
+                analysis = self.spam_detector.analyze(email_data)
+                self.log_analysis_event('analysis', email_data, analysis)
+                classification = analysis.get('classification', 'seguro')
+                if classification == 'fraude':
+                    results['fraud'] += 1
+                elif classification == 'suspeito':
+                    results['suspect'] += 1
+                else:
+                    results['safe'] += 1
+
+                if classification in ('suspeito', 'fraude'):
+                    self.log_analysis_event('detection', email_data, analysis)
+
+                decision = self.apply_risk_action(email_data, analysis)
+                is_dry_run_action = decision['action'].startswith('dry-run:')
+                action = decision['action'].replace('dry-run:', '')
+                if action == 'delete':
+                    if is_dry_run_action:
+                        results['would_delete'] += 1
+                    else:
+                        results['deleted'] += 1
+                elif action == 'quarantine':
+                    if is_dry_run_action:
+                        results['would_quarantine'] += 1
+                    else:
+                        results['quarantined'] += 1
+                else:
+                    results['kept'] += 1
+
+                results['items'].append({
+                    'uid': decision['uid'],
+                    'subject': decision['subject'],
+                    'from': decision['from'],
+                    'score': decision['score'],
+                    'classification': decision['classification'],
+                    'action': decision['action'],
+                    'reasons': decision['rules'],
+                    'success': decision['success'],
+                })
+            except Exception as exc:
+                results['errors'].append(str(exc))
+
+        return results
     
     def auto_organize(self) -> Dict:
         """Organiza e-mails automaticamente baseado em regras"""
@@ -47,7 +224,7 @@ class FolderManager:
             return results
         
         # Busca e-mails da INBOX
-        emails = self.conn.fetch_emails('INBOX', limit=100, include_body=True)
+        emails = self.conn.fetch_emails('INBOX', limit=None, include_body=True)
         
         for email_data in emails:
             try:
@@ -57,27 +234,29 @@ class FolderManager:
                 analysis = self.spam_detector.analyze(email_data)
                 
                 if analysis['is_fraud']:
-                    # Move para pasta de Fraude
-                    if self.conn.move_email(uid, 'INBOX', 'Fraude'):
+                    decision = self.apply_risk_action(email_data, analysis)
+                    if decision['success']:
                         results['fraud_detected'] += 1
-                        results['moved'] += 1
+                        if not decision['action'].startswith('dry-run:') and decision['action'] != 'keep':
+                            results['moved'] += 1
                         results['details'].append({
                             'uid': uid,
                             'subject': email_data.get('subject', ''),
-                            'action': 'Movido para Fraude',
+                            'action': decision['action'],
                             'reason': ', '.join(analysis['reasons'][:2])
                         })
                     continue
                 
                 if analysis['is_spam']:
-                    # Move para pasta de Spam
-                    if self.conn.move_email(uid, 'INBOX', 'Spam'):
+                    decision = self.apply_risk_action(email_data, analysis)
+                    if decision['success']:
                         results['spam_detected'] += 1
-                        results['moved'] += 1
+                        if not decision['action'].startswith('dry-run:') and decision['action'] != 'keep':
+                            results['moved'] += 1
                         results['details'].append({
                             'uid': uid,
                             'subject': email_data.get('subject', ''),
-                            'action': 'Movido para Spam',
+                            'action': decision['action'],
                             'reason': f"Score: {analysis['score']}"
                         })
                     continue

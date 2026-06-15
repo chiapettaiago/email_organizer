@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Logs - Email Organizer{% endblock %}
+
+{% block content %}
+<div class="logs-page">
+    <header class="page-header">
+        <h1>Logs do Sistema</h1>
+        <p class="page-subtitle">Auditoria das análises automáticas, quarentenas e exclusões de spam/fraude</p>
+    </header>
+
+    <section class="logs-summary">
+        <div class="log-summary-item">
+            <span class="summary-value">{{ logs|length }}</span>
+            <span class="summary-label">eventos exibidos</span>
+        </div>
+        <div class="log-summary-item">
+            <span class="summary-value">{{ logs|selectattr('action', 'equalto', 'delete')|list|length }}</span>
+            <span class="summary-label">exclusões</span>
+        </div>
+        <div class="log-summary-item">
+            <span class="summary-value">{{ logs|selectattr('event', 'equalto', 'detection')|list|length }}</span>
+            <span class="summary-label">detecções</span>
+        </div>
+    </section>
+
+    <section class="logs-panel">
+        {% if logs %}
+        <div class="logs-table-wrap">
+            <table class="logs-table">
+                <thead>
+                    <tr>
+                        <th>Data/hora</th>
+                        <th>Evento</th>
+                        <th>Conta</th>
+                        <th>Remetente</th>
+                        <th>Assunto</th>
+                        <th>Score</th>
+                        <th>Classe</th>
+                        <th>Ação</th>
+                        <th>Regras</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in logs %}
+                    <tr>
+                        <td class="log-time" title="{{ item.timestamp }}">{{ item.timestamp_display }}</td>
+                        <td>
+                            <span class="log-badge event-{{ item.event }}">
+                                {{ item.event }}
+                            </span>
+                        </td>
+                        <td>{{ item.account }}</td>
+                        <td class="log-from">{{ item['from'] }}</td>
+                        <td class="log-subject">
+                            <span>{{ item.subject or '(Sem assunto)' }}</span>
+                            {% if item.uid %}
+                            <small>ID {{ item.uid }}</small>
+                            {% endif %}
+                            {% if item.error %}
+                            <small class="log-error">{{ item.error }}</small>
+                            {% endif %}
+                        </td>
+                        <td><span class="score-pill">{{ item.score }}</span></td>
+                        <td>
+                            <span class="log-badge class-{{ item.classification }}">
+                                {{ item.classification or 'n/a' }}
+                            </span>
+                        </td>
+                        <td>
+                            <span class="log-badge action-{{ item.action|replace(':', '-') }}">
+                                {{ item.action }}
+                            </span>
+                        </td>
+                        <td class="log-rules">
+                            {% for rule in item.rules[:4] %}
+                            <span>{{ rule }}</span>
+                            {% endfor %}
+                            {% if item.rules|length > 4 %}
+                            <span>+{{ item.rules|length - 4 }} regras</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <h2>Nenhum log registrado ainda</h2>
+            <p>As próximas análises automáticas e manuais aparecerão aqui.</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

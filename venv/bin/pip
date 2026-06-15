@@ -1,4 +1,4 @@
-#!/srv/compartilhada/Iago/projects/organizer/venv/bin/python3
+#!/srv/compartilhada/Iago/projects/email_organizer/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
